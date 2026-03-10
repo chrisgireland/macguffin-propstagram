@@ -1066,65 +1066,67 @@ function PropRoomInventoryApp() {
     if (supabase) {
       setSaving(true);
       setSaveError(null);
-      let photoUrl = "";
+      try {
+        let photoUrl = "";
 
-      const file = formPhotoFileRef.current;
-      if (file) {
-        const ext = file.name.split(".").pop() || "jpg";
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("prop-photos")
-          .upload(path, file, { cacheControl: "3600", upsert: false });
-        if (uploadError) {
-          setSaveError("Photo upload failed. You can save without a photo and try again.");
-          setSaving(false);
-          return;
+        const file = formPhotoFileRef.current;
+        if (file) {
+          const ext = file.name.split(".").pop() || "jpg";
+          const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from("prop-photos")
+            .upload(path, file, { cacheControl: "3600", upsert: false });
+          if (uploadError) {
+            setSaveError("Photo upload failed. You can save without a photo and try again.");
+            return;
+          }
+          const { data: urlData } = supabase.storage.from("prop-photos").getPublicUrl(path);
+          photoUrl = urlData?.publicUrl ?? "";
+        } else if (form.photo && !form.photo.startsWith("blob:")) {
+          photoUrl = form.photo;
         }
-        const { data: urlData } = supabase.storage.from("prop-photos").getPublicUrl(path);
-        photoUrl = urlData?.publicUrl ?? "";
-      } else if (form.photo && !form.photo.startsWith("blob:")) {
-        photoUrl = form.photo;
-      }
-      payload.photo = photoUrl || null;
+        payload.photo = photoUrl || null;
 
-      if (editingId) {
-        const { error } = await supabase.from("props").update(payload).eq("id", editingId);
-        formPhotoFileRef.current = null;
-        setSaving(false);
-        if (error) {
-          setSaveError(error.message || "Failed to update prop.");
-          return;
+        if (editingId) {
+          const { error } = await supabase.from("props").update(payload).eq("id", editingId);
+          if (error) {
+            setSaveError(error.message || "Failed to update prop.");
+            return;
+          }
+        } else {
+          const { error } = await supabase.from("props").insert(payload);
+          if (error) {
+            setSaveError(error.message || "Failed to save prop.");
+            return;
+          }
         }
-      } else {
-        const { error } = await supabase.from("props").insert(payload);
         formPhotoFileRef.current = null;
+        setForm({
+          title: "",
+          description: "",
+          location: "",
+          category: "White Plateware",
+          job: "General Inventory",
+          quantity: 1,
+          photo: "",
+          latitude: null,
+          longitude: null,
+          map_x: null,
+          map_y: null,
+          shelf_index: null,
+          length: "",
+          width: "",
+          code: "",
+        });
+        setEditingId(null);
+        setIsModalOpen(false);
+        await fetchProps();
+        setSelectedItem(null);
+      } catch (err) {
+        setSaveError(err?.message || String(err) || "Something went wrong. Try again.");
+      } finally {
         setSaving(false);
-        if (error) {
-          setSaveError(error.message || "Failed to save prop.");
-          return;
-        }
       }
-      setForm({
-        title: "",
-        description: "",
-        location: "",
-        category: "White Plateware",
-        job: "General Inventory",
-        quantity: 1,
-        photo: "",
-        latitude: null,
-        longitude: null,
-        map_x: null,
-        map_y: null,
-        shelf_index: null,
-        length: "",
-        width: "",
-        code: "",
-      });
-      setEditingId(null);
-      setIsModalOpen(false);
-      await fetchProps();
-      setSelectedItem(null);
       return;
     }
 
