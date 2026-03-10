@@ -134,7 +134,6 @@ function LoginPage({ onSuccess }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [addAsAppOpen, setAddAsAppOpen] = useState(false);
 
   const logins = useMemo(() => parseLogins(), []);
 
@@ -215,16 +214,7 @@ function LoginPage({ onSuccess }) {
           >
             {submitting ? "Checking…" : "Log in"}
           </button>
-          <button
-            type="button"
-            onClick={() => setAddAsAppOpen(true)}
-            className="mt-3 w-full h-10 rounded-2xl border border-ink-200 bg-cream-50 font-sans text-sm text-ink-600 hover:bg-cream-100 focus:outline-none focus:ring-2 focus:ring-ink-300"
-          >
-            <Smartphone className="inline-block mr-2 h-4 w-4 align-middle" />
-            Add as app
-          </button>
         </form>
-        <AddAsAppModal open={addAsAppOpen} onClose={() => setAddAsAppOpen(false)} />
       </div>
     </div>
   );
@@ -2018,17 +2008,19 @@ function PropRoomInventoryApp({ isEditor = true }) {
             </span>
           </h1>
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              onClick={() => setAddAsAppOpen(true)}
-              variant="ghost"
-              size="default"
-              className="rounded-2xl shrink-0 text-ink-600 hover:text-ink-900"
-              title="Add to home screen"
-            >
-              <Smartphone className="mr-2 h-4 w-4" />
-              Add as app
-            </Button>
+            {isEditor && (
+              <Button
+                type="button"
+                onClick={() => setAddAsAppOpen(true)}
+                variant="ghost"
+                size="default"
+                className="rounded-2xl shrink-0 text-ink-600 hover:text-ink-900"
+                title="Add to home screen"
+              >
+                <Smartphone className="mr-2 h-4 w-4" />
+                Add as app
+              </Button>
+            )}
             {supabase && (
               <Button
                 type="button"
