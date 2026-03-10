@@ -2174,8 +2174,6 @@ function AppWithAuth() {
   return <PropRoomInventoryApp isEditor={isEditor} />;
 }
 
-const SHARE_LIST_IDS_KEY = "propstagram_share_list_ids";
-
 function App() {
   const [hash, setHash] = useState(() => window.location.hash);
   useEffect(() => {
