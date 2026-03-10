@@ -10,6 +10,8 @@ import {
   X,
   Loader2,
   Trash2,
+  Pencil,
+  Download,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
@@ -147,7 +149,21 @@ function Badge({ children, className = "" }) {
   );
 }
 
-function Modal({ open, onClose, children }) {
+function Modal({ open, onClose, children, title = "Add prop" }) {
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (open) {
+      const firstInput = document.querySelector("#add-prop-modal input, #add-prop-modal textarea");
+      if (firstInput) setTimeout(() => firstInput.focus(), 50);
+    }
+  }, [open]);
+
   if (!open) return null;
 
   return (
@@ -156,23 +172,25 @@ function Modal({ open, onClose, children }) {
       onClick={onClose}
     >
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-ink-200 bg-cream-50 shadow-soft-lg"
+        id="add-prop-modal"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-ink-200 bg-cream-50 shadow-soft-lg flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-200 bg-cream-50/95 backdrop-blur px-6 py-4 rounded-t-3xl">
-          <h2 className="font-display text-lg font-semibold text-ink-900">
-            Add prop
+          <h2 className="font-display text-lg font-semibold text-ink-900" id="add-prop-title">
+            {title}
           </h2>
           <Button
             variant="ghost"
             size="icon"
             onClick={onClose}
             className="rounded-2xl text-ink-600 hover:text-ink-900"
+            aria-label="Close"
           >
             <X className="h-5 w-5" />
           </Button>
         </div>
-        <div className="p-6">{children}</div>
+        <div className="p-6 flex-1 flex flex-col min-h-0">{children}</div>
       </div>
     </div>
   );
@@ -243,18 +261,37 @@ function ItemCard({ item, onClick }) {
   );
 }
 
-function PropDetailModal({ item, onClose, onDelete }) {
+function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+
+  useEffect(() => {
+    if (!item) return;
+    const handleEscape = (e) => {
+      if (e.key === "Escape") {
+        setShowDeleteConfirm(false);
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [item, onClose]);
+
   if (!item) return null;
+
   const handleDelete = () => {
-    if (window.confirm("Delete this prop? This cannot be undone.")) {
-      onDelete(item);
-      onClose();
-    }
+    onDelete(item);
+    onClose();
   };
+
+  const handleEdit = () => {
+    onEdit(item);
+    onClose();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/40 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={() => !showDeleteConfirm && onClose()}
     >
       <div
         className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-ink-200 bg-cream-50 shadow-soft-lg"
@@ -268,9 +305,18 @@ function PropDetailModal({ item, onClose, onDelete }) {
             <Button
               variant="ghost"
               size="icon"
-              onClick={handleDelete}
+              onClick={handleEdit}
+              className="rounded-2xl text-ink-600 hover:text-ink-900"
+              aria-label="Edit prop"
+            >
+              <Pencil className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowDeleteConfirm(true)}
               className="rounded-2xl text-red-600 hover:bg-red-50 hover:text-red-700"
-              title="Delete prop"
+              aria-label="Delete prop"
             >
               <Trash2 className="h-5 w-5" />
             </Button>
@@ -279,13 +325,20 @@ function PropDetailModal({ item, onClose, onDelete }) {
               size="icon"
               onClick={onClose}
               className="rounded-2xl text-ink-600 hover:text-ink-900"
+              aria-label="Close"
             >
               <X className="h-5 w-5" />
             </Button>
           </div>
         </div>
         <div className="p-6">
-          <div className="aspect-[4/3] max-h-80 w-full rounded-2xl overflow-hidden bg-cream-200">
+          <div
+            className="aspect-[4/3] max-h-80 w-full rounded-2xl overflow-hidden bg-cream-200 cursor-pointer"
+            onClick={() => item.photo && onOpenLightbox?.(item.photo)}
+            role={item.photo ? "button" : undefined}
+            tabIndex={item.photo ? 0 : undefined}
+            onKeyDown={(e) => item.photo && e.key === "Enter" && onOpenLightbox?.(item.photo)}
+          >
             {item.photo ? (
               <img
                 src={item.photo}
@@ -298,6 +351,30 @@ function PropDetailModal({ item, onClose, onDelete }) {
               </div>
             )}
           </div>
+
+          {showDeleteConfirm ? (
+            <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4">
+              <p className="font-sans text-sm font-medium text-red-900">
+                Delete this prop? This cannot be undone.
+              </p>
+              <div className="mt-4 flex gap-3">
+                <Button
+                  variant="outline"
+                  className="rounded-2xl"
+                  onClick={() => setShowDeleteConfirm(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="rounded-2xl bg-red-600 text-white hover:bg-red-700"
+                  onClick={handleDelete}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-6 space-y-4">
             {item.description ? (
               <p className="font-sans text-ink-700 leading-relaxed">
@@ -331,6 +408,37 @@ function PropDetailModal({ item, onClose, onDelete }) {
   );
 }
 
+function Lightbox({ imageUrl, onClose }) {
+  useEffect(() => {
+    const handleEscape = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose]);
+  if (!imageUrl) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4"
+      onClick={onClose}
+    >
+      <img
+        src={imageUrl}
+        alt=""
+        className="max-h-full max-w-full object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onClose}
+        className="absolute right-4 top-4 rounded-2xl text-white hover:bg-white/20"
+        aria-label="Close"
+      >
+        <X className="h-6 w-6" />
+      </Button>
+    </div>
+  );
+}
+
 export default function PropRoomInventoryApp() {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
@@ -339,6 +447,9 @@ export default function PropRoomInventoryApp() {
   const [jobs, setJobs] = useState(starterJobs);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [lightboxImage, setLightboxImage] = useState(null);
+  const [sortBy, setSortBy] = useState("date");
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -368,7 +479,7 @@ export default function PropRoomInventoryApp() {
     setSaveError(null);
     const { data, error } = await supabase
       .from("props")
-      .select("id, title, description, location, category, job, quantity, photo")
+      .select("id, title, description, location, category, job, quantity, photo, created_at")
       .order("created_at", { ascending: false });
     if (error) {
       setSaveError("Could not load props. Check your Supabase setup.");
@@ -488,7 +599,7 @@ export default function PropRoomInventoryApp() {
   const filteredItems = useMemo(() => {
     const q = search.toLowerCase().trim();
 
-    return items.filter((item) => {
+    const filtered = items.filter((item) => {
       const matchesSection =
         activeSection === "All Props" ||
         (item.category || "").toLowerCase() === activeSection.toLowerCase();
@@ -503,7 +614,18 @@ export default function PropRoomInventoryApp() {
 
       return matchesSection && matchesQuery;
     });
-  }, [items, search, activeSection]);
+
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortBy === "title")
+        return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+      if (sortBy === "location")
+        return (a.location || "").localeCompare(b.location || "", undefined, { sensitivity: "base" });
+      const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
+      const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
+      return dateB - dateA;
+    });
+    return sorted;
+  }, [items, search, activeSection, sortBy]);
 
   const revokePhotoUrl = (url) => {
     if (typeof url === "string" && url.startsWith("blob:")) {
@@ -538,6 +660,7 @@ export default function PropRoomInventoryApp() {
 
   const resetForm = () => {
     formPhotoFileRef.current = null;
+    setEditingId(null);
     setForm((current) => {
       revokePhotoUrl(current.photo);
       return {
@@ -552,8 +675,32 @@ export default function PropRoomInventoryApp() {
     });
   };
 
+  const openEditForm = (item) => {
+    setForm({
+      title: item.title || "",
+      description: item.description || "",
+      location: item.location || "",
+      category: item.category || "White Plateware",
+      job: item.job || "General Inventory",
+      quantity: item.quantity ?? 1,
+      photo: item.photo || "",
+    });
+    setEditingId(item.id);
+    setSaveError(null);
+    setIsModalOpen(true);
+  };
+
   const addItem = async () => {
     if (!form.title.trim() || !form.location.trim()) return;
+
+    const payload = {
+      title: form.title.trim(),
+      description: form.description.trim() || null,
+      location: form.location.trim(),
+      category: form.category,
+      job: form.job.trim(),
+      quantity: Math.max(1, Number(form.quantity || 1)),
+    };
 
     if (supabase) {
       setSaving(true);
@@ -577,22 +724,24 @@ export default function PropRoomInventoryApp() {
       } else if (form.photo && !form.photo.startsWith("blob:")) {
         photoUrl = form.photo;
       }
+      payload.photo = photoUrl || null;
 
-      const { error } = await supabase.from("props").insert({
-        title: form.title.trim(),
-        description: form.description.trim() || null,
-        location: form.location.trim(),
-        category: form.category,
-        job: form.job.trim(),
-        quantity: Math.max(1, Number(form.quantity || 1)),
-        photo: photoUrl || null,
-      });
-
-      formPhotoFileRef.current = null;
-      setSaving(false);
-      if (error) {
-        setSaveError(error.message || "Failed to save prop.");
-        return;
+      if (editingId) {
+        const { error } = await supabase.from("props").update(payload).eq("id", editingId);
+        formPhotoFileRef.current = null;
+        setSaving(false);
+        if (error) {
+          setSaveError(error.message || "Failed to update prop.");
+          return;
+        }
+      } else {
+        const { error } = await supabase.from("props").insert(payload);
+        formPhotoFileRef.current = null;
+        setSaving(false);
+        if (error) {
+          setSaveError(error.message || "Failed to save prop.");
+          return;
+        }
       }
       setForm({
         title: "",
@@ -603,24 +752,36 @@ export default function PropRoomInventoryApp() {
         quantity: 1,
         photo: "",
       });
+      setEditingId(null);
       setIsModalOpen(false);
       await fetchProps();
+      setSelectedItem(null);
       return;
     }
 
-    setItems((current) => [
-      {
-        id: Date.now(),
-        title: form.title.trim(),
-        description: form.description.trim(),
-        location: form.location.trim(),
-        category: form.category,
-        job: form.job.trim(),
-        quantity: Math.max(1, Number(form.quantity || 1)),
-        photo: form.photo.trim(),
-      },
-      ...current,
-    ]);
+    if (editingId) {
+      setItems((current) =>
+        current.map((i) =>
+          i.id === editingId
+            ? {
+                ...i,
+                ...payload,
+                photo: form.photo.trim() || i.photo,
+              }
+            : i
+        )
+      );
+      setSelectedItem(null);
+    } else {
+      setItems((current) => [
+        {
+          id: Date.now(),
+          ...payload,
+          photo: form.photo.trim(),
+        },
+        ...current,
+      ]);
+    }
 
     setForm({
       title: "",
@@ -631,7 +792,7 @@ export default function PropRoomInventoryApp() {
       quantity: 1,
       photo: "",
     });
-
+    setEditingId(null);
     setIsModalOpen(false);
   };
 
@@ -644,6 +805,34 @@ export default function PropRoomInventoryApp() {
       setItems((current) => current.filter((i) => i.id !== item.id));
     }
     setSelectedItem(null);
+  };
+
+  const exportCSV = () => {
+    const headers = ["Title", "Description", "Location", "Category", "Job", "Quantity"];
+    const escape = (v) => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g, '""')}"`
+        : s;
+    };
+    const rows = filteredItems.map((item) =>
+      [
+        item.title,
+        item.description ?? "",
+        item.location,
+        item.category ?? "",
+        item.job ?? "",
+        item.quantity ?? 1,
+      ].map(escape).join(",")
+    );
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `props-${activeSection.replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -667,7 +856,11 @@ export default function PropRoomInventoryApp() {
             </span>
           </h1>
           <Button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              setEditingId(null);
+              setSaveError(null);
+              setIsModalOpen(true);
+            }}
             variant="primary"
             size="default"
             className="rounded-2xl shrink-0"
@@ -681,10 +874,24 @@ export default function PropRoomInventoryApp() {
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
           onDelete={deleteItem}
+          onEdit={openEditForm}
+          onOpenLightbox={setLightboxImage}
         />
 
-        <Modal open={isModalOpen} onClose={() => { setSaveError(null); setIsModalOpen(false); }}>
-          <div className="grid gap-5">
+        <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
+
+        <Modal
+          open={isModalOpen}
+          onClose={() => {
+            setSaveError(null);
+            setEditingId(null);
+            setIsModalOpen(false);
+          }}
+          title={editingId ? "Edit prop" : "Add prop"}
+        >
+          <div className="flex flex-col max-h-[70vh]">
+            <div className="flex-1 overflow-y-auto pr-1">
+              <div className="grid gap-5">
             <div>
               <Label className="block mb-1.5">Title</Label>
               <Input
@@ -847,8 +1054,9 @@ export default function PropRoomInventoryApp() {
                 {saveError}
               </p>
             )}
+            </div>
 
-            <div className="flex gap-3 pt-2">
+            <div className="sticky bottom-0 mt-4 pt-4 border-t border-ink-200 bg-cream-50 flex gap-3">
               <Button
                 type="button"
                 variant="outline"
@@ -871,7 +1079,7 @@ export default function PropRoomInventoryApp() {
                     Saving…
                   </>
                 ) : (
-                  "Save Prop"
+                  editingId ? "Update Prop" : "Save Prop"
                 )}
               </Button>
             </div>
@@ -879,12 +1087,22 @@ export default function PropRoomInventoryApp() {
         </Modal>
 
         {loading ? (
-          <Card className="border-ink-200/60">
-            <CardContent className="flex items-center justify-center gap-3 py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-ink-500" />
-              <span className="font-sans text-ink-600">Loading props…</span>
-            </CardContent>
-          </Card>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <Card key={i} className="overflow-hidden border-ink-200/60">
+                <div className="aspect-[4/3] bg-cream-200 animate-pulse" />
+                <CardContent className="p-5">
+                  <div className="h-6 w-3/4 bg-cream-300 rounded animate-pulse" />
+                  <div className="mt-3 h-4 w-full bg-cream-200 rounded animate-pulse" />
+                  <div className="mt-3 h-4 w-1/2 bg-cream-200 rounded animate-pulse" />
+                  <div className="mt-4 flex gap-4">
+                    <div className="h-4 w-24 bg-cream-200 rounded animate-pulse" />
+                    <div className="h-4 w-20 bg-cream-200 rounded animate-pulse" />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         ) : saveError && !items.length ? (
           <Card className="border-amber-200 bg-amber-50/80">
             <CardContent className="py-6">
@@ -945,10 +1163,34 @@ export default function PropRoomInventoryApp() {
           })}
         </div>
 
-        {/* Results line */}
-        <p className="mt-4 font-sans text-sm text-ink-600">
-          {filteredItems.length} {filteredItems.length === 1 ? "prop" : "props"}
-        </p>
+        {/* Results line: count, sort, export */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <p className="font-sans text-sm text-ink-600">
+            {filteredItems.length} {filteredItems.length === 1 ? "prop" : "props"}
+          </p>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="h-9 rounded-xl border border-ink-200 bg-cream-50 px-3 font-sans text-sm text-ink-800 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
+            aria-label="Sort by"
+          >
+            <option value="date">Date added</option>
+            <option value="title">Title</option>
+            <option value="location">Location</option>
+          </select>
+          {filteredItems.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="default"
+              className="rounded-xl h-9"
+              onClick={exportCSV}
+            >
+              <Download className="mr-1.5 h-4 w-4" />
+              Export CSV
+            </Button>
+          )}
+        </div>
 
         {/* Item grid or empty state */}
         {filteredItems.length > 0 ? (
@@ -969,6 +1211,19 @@ export default function PropRoomInventoryApp() {
               <p className="mt-2 font-sans text-sm text-ink-600">
                 Try another search, switch tabs, or add a prop.
               </p>
+              <Button
+                type="button"
+                variant="primary"
+                className="mt-6 rounded-2xl"
+                onClick={() => {
+                  setEditingId(null);
+                  setSaveError(null);
+                  setIsModalOpen(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add prop
+              </Button>
             </CardContent>
           </Card>
         )}
