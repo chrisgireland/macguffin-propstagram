@@ -1584,13 +1584,36 @@ function PropRoomInventoryApp({ onLogout, showLogout }) {
   );
 }
 
+const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
+
 function AppWithAuth() {
   const [authed, setAuthed] = useState(() => isAuthenticated());
   const protected_ = isPasswordProtectionEnabled();
+  const inactivityTimerRef = useRef(null);
 
   useEffect(() => {
     if (!protected_) setAuthed(true);
   }, [protected_]);
+
+  useEffect(() => {
+    if (!protected_ || !authed) return;
+
+    const resetTimer = () => {
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+      inactivityTimerRef.current = setTimeout(() => {
+        clearAuthenticated();
+        setAuthed(false);
+      }, INACTIVITY_MS);
+    };
+
+    resetTimer();
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
+    events.forEach((ev) => document.addEventListener(ev, resetTimer));
+    return () => {
+      events.forEach((ev) => document.removeEventListener(ev, resetTimer));
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    };
+  }, [protected_, authed]);
 
   if (protected_ && !authed) {
     return <LoginPage onSuccess={() => setAuthed(true)} />;
