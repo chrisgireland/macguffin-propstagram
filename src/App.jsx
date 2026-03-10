@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
-// Custom prop room map: one image; optional pins or shelf highlight (0–1 coords)
+// Custom prop room map: shelf-based selection (hover to highlight, click to select shelf)
 const ROOM_MAP_URL = "/prop-room-map.svg";
 
 // Shelf regions matching placeholder SVG (viewBox 800×500), normalized to 0–1: [x, y, width, height]
@@ -30,82 +30,79 @@ const SHELF_REGIONS = [
 
 function findShelfAt(map_x, map_y) {
   if (typeof map_x !== "number" || typeof map_y !== "number") return null;
-  for (const [x, y, w, h] of SHELF_REGIONS) {
-    if (map_x >= x && map_x <= x + w && map_y >= y && map_y <= y + h) return [x, y, w, h];
+  for (let i = 0; i < SHELF_REGIONS.length; i++) {
+    const [x, y, w, h] = SHELF_REGIONS[i];
+    if (map_x >= x && map_x <= x + w && map_y >= y && map_y <= y + h) return i;
   }
   return null;
 }
 
-function RoomMap({ items, onSelectItem, clickToSet, highlightPoint, className = "" }) {
-  const containerRef = useRef(null);
+function getShelfIndexForItem(item) {
+  if (item == null) return null;
+  if (item.shelf_index != null && Number.isInteger(item.shelf_index) && item.shelf_index >= 0 && item.shelf_index < SHELF_REGIONS.length)
+    return item.shelf_index;
+  if (typeof item.map_x === "number" && typeof item.map_y === "number") return findShelfAt(item.map_x, item.map_y);
+  return null;
+}
 
-  const hasMapPos = (item) =>
-    item != null && typeof item.map_x === "number" && typeof item.map_y === "number";
-  const withPos = items.filter(hasMapPos);
-  const highlightShelf = highlightPoint ? findShelfAt(highlightPoint.map_x, highlightPoint.map_y) : null;
+function RoomMap({ selectShelf, selectedShelfIndex, highlightShelfIndex, className = "" }) {
+  const [hoverShelf, setHoverShelf] = useState(null);
 
-  const handleClick = (e) => {
-    if (!clickToSet || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    if (x >= 0 && x <= 1 && y >= 0 && y <= 1) clickToSet(x, y);
-  };
+  const displayShelf = highlightShelfIndex != null ? highlightShelfIndex : (selectedShelfIndex != null ? selectedShelfIndex : hoverShelf);
+  const bounds = displayShelf != null && displayShelf >= 0 && displayShelf < SHELF_REGIONS.length ? SHELF_REGIONS[displayShelf] : null;
+  const isHighlight = highlightShelfIndex != null;
 
   return (
     <div
-      ref={containerRef}
       className={cn("relative w-full overflow-hidden rounded-2xl border border-ink-200 bg-cream-100", className)}
-      style={{ aspectRatio: "8/5", ...(clickToSet ? { cursor: "crosshair" } : {}) }}
-      onClick={clickToSet ? handleClick : undefined}
-      role={clickToSet ? "button" : undefined}
+      style={{ aspectRatio: "8/5" }}
     >
       <img
         src={ROOM_MAP_URL}
         alt="Prop room layout"
-        className="absolute inset-0 h-full w-full object-cover"
+        className="absolute inset-0 h-full w-full object-cover pointer-events-none"
         draggable={false}
-        style={{ pointerEvents: clickToSet ? "none" : "auto" }}
       />
-      {highlightShelf && (
-        <div
-          className="absolute border-2 border-red-600 bg-red-500/50 pointer-events-none"
-          style={{
-            left: `${highlightShelf[0] * 100}%`,
-            top: `${highlightShelf[1] * 100}%`,
-            width: `${highlightShelf[2] * 100}%`,
-            height: `${highlightShelf[3] * 100}%`,
-          }}
-          aria-hidden
-        />
-      )}
-      {highlightPoint && !highlightShelf && (
-        <div
-          className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-red-600 bg-red-500/70 pointer-events-none"
-          style={{
-            left: `${highlightPoint.map_x * 100}%`,
-            top: `${highlightPoint.map_y * 100}%`,
-          }}
-          aria-hidden
-        />
-      )}
-      {!highlightPoint && withPos.map((item) => (
+      {SHELF_REGIONS.map(([x, y, w, h], i) => (
         <button
-          key={item.id}
+          key={i}
           type="button"
-          className="absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-ink-900 bg-accent shadow-md transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1"
-          style={{ left: `${item.map_x * 100}%`, top: `${item.map_y * 100}%` }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelectItem?.(item);
+          className={cn(
+            "absolute border-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1",
+            selectShelf
+              ? "cursor-pointer border-transparent bg-transparent hover:border-amber-400 hover:bg-amber-400/30"
+              : "pointer-events-none border-transparent"
+          )}
+          style={{
+            left: `${x * 100}%`,
+            top: `${y * 100}%`,
+            width: `${w * 100}%`,
+            height: `${h * 100}%`,
           }}
-          aria-label={item.title}
-          title={item.title}
+          onClick={() => selectShelf?.(i)}
+          onMouseEnter={() => selectShelf && setHoverShelf(i)}
+          onMouseLeave={() => selectShelf && setHoverShelf(null)}
+          aria-label={selectShelf ? `Select shelf ${i + 1}` : undefined}
         />
       ))}
-      {clickToSet && (
+      {bounds && !selectShelf && (
+        <div
+          className={cn(
+            "absolute border-2 pointer-events-none",
+            isHighlight ? "border-red-600 bg-red-500/50" : "border-amber-400 bg-amber-400/30"
+          )}
+          style={{
+            left: `${bounds[0] * 100}%`,
+            top: `${bounds[1] * 100}%`,
+            width: `${bounds[2] * 100}%`,
+            height: `${bounds[3] * 100}%`,
+          }}
+          aria-hidden
+        />
+      )}
+      {selectShelf && (
         <p className="pointer-events-none absolute bottom-2 left-2 right-2 z-10 rounded-xl bg-ink-900/80 px-3 py-2 text-center text-sm text-cream-50 shadow-lg">
-          Click the map to set this prop’s location
+          Hover a shelf to highlight it, click to select
         </p>
       )}
     </div>
@@ -126,6 +123,7 @@ const sectionTitles = [
   "Pots/Pans",
   "Utensils",
   "Miscellaneous",
+  "Surfaces",
 ];
 
 const starterJobs = ["General Inventory"];
@@ -246,7 +244,7 @@ function Badge({ children, className = "" }) {
   );
 }
 
-function Modal({ open, onClose, children, title = "Add prop" }) {
+function Modal({ open, onClose, children, title = "Add prop/surface" }) {
   useEffect(() => {
     if (!open) return;
     const handleEscape = (e) => e.key === "Escape" && onClose();
@@ -497,13 +495,19 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
                 <Package2 className="h-4 w-4 text-ink-500 flex-shrink-0" />
                 <span>Qty: {item.quantity || 1}</span>
               </div>
+              {(item.length || item.width) ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-ink-500 font-medium">Dimensions:</span>
+                  <span>{[item.length, item.width].filter(Boolean).join(" × ")}</span>
+                </div>
+              ) : null}
             </div>
 
-            {typeof item.map_x === "number" && typeof item.map_y === "number" ? (
+            {getShelfIndexForItem(item) != null ? (
               <div className="mt-6">
                 <span className="font-sans text-sm font-medium text-ink-700 block mb-2">Location on floor plan</span>
                 <div className="w-full rounded-2xl overflow-hidden border border-ink-200" style={{ aspectRatio: "8/5" }}>
-                  <RoomMap highlightPoint={{ map_x: item.map_x, map_y: item.map_y }} />
+                  <RoomMap highlightShelfIndex={getShelfIndexForItem(item)} />
                 </div>
               </div>
             ) : null}
@@ -570,6 +574,9 @@ export default function PropRoomInventoryApp() {
     longitude: null,
     map_x: null,
     map_y: null,
+    shelf_index: null,
+    length: "",
+    width: "",
   });
 
   const cameraInputRef = useRef(null);
@@ -591,7 +598,7 @@ export default function PropRoomInventoryApp() {
     setSaveError(null);
     const { data, error } = await supabase
       .from("props")
-      .select("id, title, description, location, category, job, quantity, photo, latitude, longitude, map_x, map_y, created_at")
+      .select("id, title, description, location, category, job, quantity, photo, latitude, longitude, map_x, map_y, shelf_index, length, width, created_at")
       .order("created_at", { ascending: false });
     if (error) {
       setSaveError("Could not load props. Check your Supabase setup.");
@@ -787,6 +794,9 @@ export default function PropRoomInventoryApp() {
         longitude: null,
         map_x: null,
         map_y: null,
+        shelf_index: null,
+        length: "",
+        width: "",
       };
     });
   };
@@ -804,6 +814,9 @@ export default function PropRoomInventoryApp() {
       longitude: item.longitude ?? null,
       map_x: item.map_x ?? null,
       map_y: item.map_y ?? null,
+      shelf_index: item.shelf_index ?? null,
+      length: item.length ?? "",
+      width: item.width ?? "",
     });
     setEditingId(item.id);
     setSaveError(null);
@@ -828,6 +841,10 @@ export default function PropRoomInventoryApp() {
         typeof form.map_x === "number" && !Number.isNaN(form.map_x) ? form.map_x : null,
       map_y:
         typeof form.map_y === "number" && !Number.isNaN(form.map_y) ? form.map_y : null,
+      shelf_index:
+        form.shelf_index != null && Number.isInteger(form.shelf_index) && form.shelf_index >= 0 ? form.shelf_index : null,
+      length: form.length?.trim() || null,
+      width: form.width?.trim() || null,
     };
 
     if (supabase) {
@@ -883,6 +900,9 @@ export default function PropRoomInventoryApp() {
         longitude: null,
         map_x: null,
         map_y: null,
+        shelf_index: null,
+        length: "",
+        width: "",
       });
       setEditingId(null);
       setIsModalOpen(false);
@@ -925,6 +945,11 @@ export default function PropRoomInventoryApp() {
       photo: "",
       latitude: null,
       longitude: null,
+      map_x: null,
+      map_y: null,
+      shelf_index: null,
+      length: "",
+      width: "",
     });
     setEditingId(null);
     setIsModalOpen(false);
@@ -1000,7 +1025,7 @@ export default function PropRoomInventoryApp() {
             className="rounded-2xl shrink-0"
           >
             <Plus className="mr-2 h-4 w-4" />
-            Add Prop
+            Add Prop/Surface
           </Button>
         </div>
 
@@ -1021,7 +1046,7 @@ export default function PropRoomInventoryApp() {
             setEditingId(null);
             setIsModalOpen(false);
           }}
-          title={editingId ? "Edit prop" : "Add prop"}
+          title={editingId ? "Edit prop/surface" : "Add prop/surface"}
         >
           <div className="flex flex-col max-h-[70vh]">
             <div className="flex-1 overflow-y-auto pr-1">
@@ -1055,21 +1080,21 @@ export default function PropRoomInventoryApp() {
             </div>
 
             <div>
-              <Label className="block mb-1.5">Map location (optional)</Label>
+              <Label className="block mb-1.5">Shelf on floor plan (optional)</Label>
               <p className="mb-2 text-sm text-ink-600">
-                Link this prop to a spot on the room map. Click the map to set the location.
+                Click the map and then click a shelf to assign this prop to that shelf.
               </p>
-              {(form.map_x != null && form.map_y != null) ? (
+              {form.shelf_index != null && form.shelf_index >= 0 ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-xl bg-cream-200 px-3 py-2 font-mono text-sm text-ink-700">
-                    {Number(form.map_x * 100).toFixed(0)}%, {Number(form.map_y * 100).toFixed(0)}%
+                  <span className="rounded-xl bg-cream-200 px-3 py-2 font-sans text-sm text-ink-700">
+                    Shelf {form.shelf_index + 1} selected
                   </span>
                   <Button
                     type="button"
                     variant="outline"
                     size="default"
                     className="rounded-xl"
-                    onClick={() => setForm({ ...form, map_x: null, map_y: null })}
+                    onClick={() => setForm({ ...form, shelf_index: null })}
                   >
                     Clear
                   </Button>
@@ -1081,7 +1106,7 @@ export default function PropRoomInventoryApp() {
                     onClick={() => setMapPickerOpen(true)}
                   >
                     <MapIcon className="mr-1.5 h-4 w-4" />
-                    Change on map
+                    Change shelf
                   </Button>
                 </div>
               ) : (
@@ -1093,9 +1118,28 @@ export default function PropRoomInventoryApp() {
                   onClick={() => setMapPickerOpen(true)}
                 >
                   <MapIcon className="mr-1.5 h-4 w-4" />
-                  Set location on map
+                  Select shelf on map
                 </Button>
               )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="block mb-1.5">Length (L)</Label>
+                <Input
+                  value={form.length}
+                  onChange={(e) => setForm({ ...form, length: e.target.value })}
+                  placeholder="e.g. 24 in"
+                />
+              </div>
+              <div>
+                <Label className="block mb-1.5">Width (W)</Label>
+                <Input
+                  value={form.width}
+                  onChange={(e) => setForm({ ...form, width: e.target.value })}
+                  placeholder="e.g. 18 in"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -1258,7 +1302,7 @@ export default function PropRoomInventoryApp() {
                     Saving…
                   </>
                 ) : (
-                  editingId ? "Update Prop" : "Save Prop"
+                  editingId ? "Update Prop/Surface" : "Save Prop/Surface"
                 )}
               </Button>
             </div>
@@ -1268,15 +1312,15 @@ export default function PropRoomInventoryApp() {
         <Modal
           open={mapPickerOpen}
           onClose={() => setMapPickerOpen(false)}
-          title="Set location on room map"
+          title="Select a shelf"
         >
           <div className="w-full" style={{ aspectRatio: "8/5" }}>
             <RoomMap
-              items={[]}
-              clickToSet={(map_x, map_y) => {
-                setForm((f) => ({ ...f, map_x, map_y }));
+              selectShelf={(index) => {
+                setForm((f) => ({ ...f, shelf_index: index }));
                 setMapPickerOpen(false);
               }}
+              selectedShelfIndex={form.shelf_index}
             />
           </div>
         </Modal>
@@ -1417,7 +1461,7 @@ export default function PropRoomInventoryApp() {
                 }}
               >
                 <Plus className="mr-2 h-4 w-4" />
-                Add prop
+                Add prop/surface
               </Button>
             </CardContent>
           </Card>

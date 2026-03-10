@@ -35,6 +35,9 @@ create table if not exists public.props (
   longitude double precision,
   map_x double precision,
   map_y double precision,
+  shelf_index int,
+  length text,
+  width text,
   created_at timestamptz not null default now()
 );
 
@@ -66,10 +69,13 @@ alter table public.props
   add column if not exists latitude double precision,
   add column if not exists longitude double precision,
   add column if not exists map_x double precision,
-  add column if not exists map_y double precision;
+  add column if not exists map_y double precision,
+  add column if not exists shelf_index int,
+  add column if not exists length text,
+  add column if not exists width text;
 ```
 
-`map_x` and `map_y` are for the **custom prop room map** (0–1 coordinates on your room image). Replace `public/prop-room-map.svg` with a photo or drawing of your shelving to use it.
+`shelf_index` is which shelf the prop is on (0–N on the floor plan). `length` and `width` are optional dimensions (e.g. "24 in", "18 cm"). Replace `public/prop-room-map.svg` with your own floor plan to use it.
 
 ### 2b. Create the `jobs` and `sections` tables (shared job and category lists)
 
@@ -122,7 +128,8 @@ insert into public.sections (name, sort_order) values
   ('Copper', 7),
   ('Pots/Pans', 8),
   ('Utensils', 9),
-  ('Miscellaneous', 10)
+  ('Miscellaneous', 10),
+  ('Surfaces', 11)
 on conflict (name) do nothing;
 ```
 
