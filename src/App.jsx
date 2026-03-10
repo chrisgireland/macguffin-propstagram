@@ -17,6 +17,7 @@ import {
   ListPlus,
   Link2,
   List,
+  Smartphone,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
@@ -133,6 +134,7 @@ function LoginPage({ onSuccess }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [addAsAppOpen, setAddAsAppOpen] = useState(false);
 
   const logins = useMemo(() => parseLogins(), []);
 
@@ -213,7 +215,16 @@ function LoginPage({ onSuccess }) {
           >
             {submitting ? "Checking…" : "Log in"}
           </button>
+          <button
+            type="button"
+            onClick={() => setAddAsAppOpen(true)}
+            className="mt-3 w-full h-10 rounded-2xl border border-ink-200 bg-cream-50 font-sans text-sm text-ink-600 hover:bg-cream-100 focus:outline-none focus:ring-2 focus:ring-ink-300"
+          >
+            <Smartphone className="inline-block mr-2 h-4 w-4 align-middle" />
+            Add as app
+          </button>
         </form>
+        <AddAsAppModal open={addAsAppOpen} onClose={() => setAddAsAppOpen(false)} />
       </div>
     </div>
   );
@@ -330,6 +341,38 @@ const sectionTitles = [
 ];
 
 const starterJobs = ["General Inventory"];
+
+function getAddAsAppInfo() {
+  if (typeof navigator === "undefined") return { platform: "desktop", steps: [] };
+  const ua = navigator.userAgent || "";
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/.test(ua);
+  if (isIOS)
+    return {
+      platform: "ios",
+      steps: [
+        "Tap the Share button (square with an arrow pointing up) at the bottom of Safari.",
+        "Scroll down and tap “Add to Home Screen”.",
+        "Tap “Add” in the top right.",
+      ],
+    };
+  if (isAndroid)
+    return {
+      platform: "android",
+      steps: [
+        "Tap the menu (⋮) in the top right of Chrome.",
+        "Tap “Add to Home screen” or “Install app”.",
+        "Confirm by tapping “Add” or “Install”.",
+      ],
+    };
+  return {
+    platform: "desktop",
+    steps: [
+      "On your phone or tablet, open this page in Safari (iPhone/iPad) or Chrome (Android).",
+      "Then use “Add as app” on that device to see steps for your browser.",
+    ],
+  };
+}
 
 function cn(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -491,6 +534,30 @@ function Modal({ open, onClose, children, title = "Add prop/surface" }) {
         <div className="p-6 flex-1 flex flex-col min-h-0">{children}</div>
       </div>
     </div>
+  );
+}
+
+function AddAsAppModal({ open, onClose }) {
+  const info = useMemo(() => getAddAsAppInfo(), []);
+  if (!open) return null;
+  return (
+    <Modal open={true} onClose={onClose} title="Add as app">
+      <div className="space-y-4">
+        <p className="font-sans text-ink-700">
+          Add this site to your home screen to open it like an app. Follow the steps for your device:
+        </p>
+        <ol className="list-decimal list-inside space-y-2 font-sans text-ink-800">
+          {info.steps.map((step, i) => (
+            <li key={i} className="pl-1">{step}</li>
+          ))}
+        </ol>
+        {info.platform === "desktop" && (
+          <p className="text-sm text-ink-600">
+            Or scan this page’s URL with your phone to open it there, then tap “Add as app” again.
+          </p>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -1451,6 +1518,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
   const [photoToCrop, setPhotoToCrop] = useState(null);
   const [addToListItem, setAddToListItem] = useState(null);
   const [listsModalOpen, setListsModalOpen] = useState(false);
+  const [addAsAppOpen, setAddAsAppOpen] = useState(false);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -1950,6 +2018,17 @@ function PropRoomInventoryApp({ isEditor = true }) {
             </span>
           </h1>
           <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              onClick={() => setAddAsAppOpen(true)}
+              variant="ghost"
+              size="default"
+              className="rounded-2xl shrink-0 text-ink-600 hover:text-ink-900"
+              title="Add to home screen"
+            >
+              <Smartphone className="mr-2 h-4 w-4" />
+              Add as app
+            </Button>
             {supabase && (
               <Button
                 type="button"
@@ -2001,6 +2080,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
           open={listsModalOpen}
           onClose={() => setListsModalOpen(false)}
         />
+        <AddAsAppModal open={addAsAppOpen} onClose={() => setAddAsAppOpen(false)} />
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
 
         <Modal
