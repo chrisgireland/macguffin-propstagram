@@ -559,6 +559,39 @@ function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
   );
 }
 
+function CategoryCard({ label, photo, isActive, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group relative flex w-full overflow-hidden rounded-2xl border-2 text-left transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2",
+        isActive ? "border-ink-900 shadow-lg ring-2 ring-ink-900/20" : "border-ink-200 hover:border-ink-300"
+      )}
+      style={{ aspectRatio: "4/3" }}
+    >
+      <div
+        className={cn(
+          "absolute inset-0 bg-cover bg-center transition-all duration-300 group-hover:blur-md",
+          !photo && "bg-cream-200"
+        )}
+        style={photo ? { backgroundImage: `url(${photo})` } : undefined}
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-ink-900/85 via-ink-900/40 to-transparent" />
+      <div className="absolute inset-0 flex items-end p-4 sm:p-5">
+        <span className="font-sans text-lg font-semibold text-white drop-shadow-md transition-transform duration-300 group-hover:scale-110 sm:text-xl">
+          {label}
+        </span>
+      </div>
+      {!photo && (
+        <div className="absolute inset-0 flex items-center justify-center text-ink-400 opacity-60">
+          <Package2 className="h-14 w-14 sm:h-16 sm:w-16" strokeWidth={1.25} />
+        </div>
+      )}
+    </button>
+  );
+}
+
 function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true, onAddToList, showLocation = true }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
@@ -1444,6 +1477,24 @@ function PropRoomInventoryApp({ isEditor = true }) {
     return sorted;
   }, [items, search, activeSection, sortBy, isEditor]);
 
+  const categoryThumbnails = useMemo(() => {
+    const jobFiltered =
+      isEditor ? items : items.filter((item) => (item.job || "").trim() === GENERAL_INVENTORY);
+    const byCreated = (a, b) => {
+      const da = a.created_at ? new Date(a.created_at) : new Date(0);
+      const db = b.created_at ? new Date(b.created_at) : new Date(0);
+      return db - da;
+    };
+    return sections.map((sectionName) => {
+      const inSection =
+        sectionName === "All Props"
+          ? jobFiltered
+          : jobFiltered.filter((item) => (item.category || "").toLowerCase() === sectionName.toLowerCase());
+      const last = inSection.slice().sort(byCreated)[0];
+      return { sectionName, photo: last?.photo || null };
+    });
+  }, [items, sections, isEditor]);
+
   const revokePhotoUrl = (url) => {
     if (typeof url === "string" && url.startsWith("blob:")) {
       URL.revokeObjectURL(url);
@@ -2153,7 +2204,22 @@ function PropRoomInventoryApp({ isEditor = true }) {
           </Card>
         ) : null}
 
-        {/* Search + tabs + count */}
+        {/* Category thumbnail grid (landing) */}
+        {!loading && (
+          <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
+            {categoryThumbnails.map(({ sectionName, photo }) => (
+              <CategoryCard
+                key={sectionName}
+                label={sectionName === "All Props" ? "All Props and Surfaces" : sectionName}
+                photo={photo}
+                isActive={activeSection === sectionName}
+                onClick={() => setActiveSection(sectionName)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Search + results line */}
         {!loading && (
         <>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2169,32 +2235,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
           <span className="font-sans text-sm text-ink-600">
             {items.reduce((sum, item) => sum + (item.quantity || 1), 0)} props
           </span>
-        </div>
-
-        {/* Section tabs */}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {sections.map((name) => {
-            const count =
-              name === "All Props"
-                ? items.length
-                : items.filter((item) => item.category === name).length;
-            const isActive = activeSection === name;
-            return (
-              <button
-                key={name}
-                type="button"
-                onClick={() => setActiveSection(name)}
-                className={cn(
-                  "rounded-xl px-4 py-2 font-sans text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-ink-900 text-cream-50"
-                    : "bg-cream-200/80 text-ink-700 hover:bg-cream-300"
-                )}
-              >
-                {name} <span className="opacity-70">({count})</span>
-              </button>
-            );
-          })}
         </div>
 
         {/* Results line: count, sort, export */}
@@ -2274,10 +2314,11 @@ function PropRoomInventoryApp({ isEditor = true }) {
 
 const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
 
-function AppWithAuth() {
+function AppWithAuth({ hash = "" }) {
   const [authed, setAuthed] = useState(() => isAuthenticated());
   const protected_ = isPasswordProtectionEnabled();
   const inactivityTimerRef = useRef(null);
+  const shareMatch = (hash || window.location.hash).match(/^#\/share\/([a-f0-9-]{36})$/i);
 
   useEffect(() => {
     if (!protected_) setAuthed(true);
@@ -2307,6 +2348,15 @@ function AppWithAuth() {
     return <LoginPage onSuccess={() => setAuthed(true)} />;
   }
 
+  if (shareMatch) {
+    return (
+      <ShareView
+        listId={shareMatch[1]}
+        onBack={() => { window.location.hash = ""; }}
+      />
+    );
+  }
+
   const isEditor = !protected_ || getAuthenticatedRole() === "editor";
   return <PropRoomInventoryApp isEditor={isEditor} />;
 }
@@ -2318,16 +2368,7 @@ function App() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  const shareMatch = hash.match(/^#\/share\/([a-f0-9-]{36})$/i);
-  if (shareMatch) {
-    return (
-      <ShareView
-        listId={shareMatch[1]}
-        onBack={() => { window.location.hash = ""; }}
-      />
-    );
-  }
-  return <AppWithAuth />;
+  return <AppWithAuth hash={hash} />;
 }
 
 export default App;
