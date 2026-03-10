@@ -15,6 +15,8 @@ import {
   Pencil,
   Download,
   Map as MapIcon,
+  ListPlus,
+  Link2,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
@@ -39,6 +41,7 @@ function getCroppedImg(image, crop) {
 
 const AUTH_SESSION_KEY = "propstagram_authed";
 const AUTH_ROLE_KEY = "propstagram_role";
+const SHARE_LIST_IDS_KEY = "propstagram_share_list_ids";
 const PASSWORD_HASH_ENV = "VITE_PASSWORD_HASH";
 const LOGINS_ENV = "VITE_LOGINS";
 
@@ -475,7 +478,7 @@ function Modal({ open, onClose, children, title = "Add prop/surface" }) {
   );
 }
 
-function ItemCard({ item, onClick }) {
+function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
   return (
     <Card
       role="button"
@@ -509,7 +512,19 @@ function ItemCard({ item, onClick }) {
             </p>
           </div>
 
-          <div className="flex flex-shrink-0 flex-col gap-2">
+          <div className="flex flex-shrink-0 flex-col gap-2 items-end">
+            {onAddToList ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl text-ink-600 hover:text-ink-900 -mr-1 -mt-1"
+                onClick={(e) => { e.stopPropagation(); e.preventDefault(); onAddToList(item); }}
+                aria-label="Add to list"
+              >
+                <ListPlus className="h-4 w-4" />
+              </Button>
+            ) : null}
             <Badge>{item.category || "Prop"}</Badge>
             {item.job ? (
               <Badge className="bg-cream-200/80">{item.job}</Badge>
@@ -521,10 +536,12 @@ function ItemCard({ item, onClick }) {
           {item.code ? (
             <span className="font-mono font-semibold text-ink-800">{item.code}</span>
           ) : null}
-          <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-ink-500 flex-shrink-0" />
-            <span className="truncate">{item.location}</span>
-          </div>
+          {showLocation && (
+            <div className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-ink-500 flex-shrink-0" />
+              <span className="truncate">{item.location}</span>
+            </div>
+          )}
           {item.job ? (
             <div className="flex items-center gap-2">
               <Briefcase className="h-4 w-4 text-ink-500 flex-shrink-0" />
@@ -541,7 +558,7 @@ function ItemCard({ item, onClick }) {
   );
 }
 
-function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true }) {
+function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true, onAddToList, showLocation = true }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   useEffect(() => {
@@ -603,6 +620,18 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canE
                   <Trash2 className="h-5 w-5" />
                 </Button>
               </>
+            )}
+            {onAddToList && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onAddToList(item)}
+                className="rounded-2xl text-ink-600 hover:text-ink-900"
+                aria-label="Add to list"
+                title="Add to list"
+              >
+                <ListPlus className="h-5 w-5" />
+              </Button>
             )}
             <Button
               variant="ghost"
@@ -675,10 +704,12 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canE
                   <span>Code: {item.code}</span>
                 </div>
               ) : null}
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-ink-500 flex-shrink-0" />
-                <span>{item.location}</span>
-              </div>
+              {showLocation && (
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-ink-500 flex-shrink-0" />
+                  <span>{item.location}</span>
+                </div>
+              )}
               {item.job ? (
                 <div className="flex items-center gap-2">
                   <Briefcase className="h-4 w-4 text-ink-500 flex-shrink-0" />
@@ -792,6 +823,303 @@ function Lightbox({ imageUrl, onClose }) {
   );
 }
 
+function ShareView({ listId, onBack }) {
+  const [list, setList] = useState(null);
+  const [props, setProps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [lightboxImage, setLightboxImage] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}#/share/${listId}` : "";
+
+  useEffect(() => {
+    if (!listId || !supabase) {
+      setLoading(false);
+      if (!supabase) setError("Shared lists are not configured.");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: listData, error: listErr } = await supabase
+        .from("shared_lists")
+        .select("id, name, created_at")
+        .eq("id", listId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (listErr || !listData) {
+        setError("List not found.");
+        setLoading(false);
+        return;
+      }
+      setList(listData);
+      const { data: itemsData, error: itemsErr } = await supabase
+        .from("shared_list_items")
+        .select("prop_id, sort_order")
+        .eq("list_id", listId)
+        .order("sort_order");
+      if (cancelled) return;
+      if (itemsErr || !itemsData?.length) {
+        setProps([]);
+        setLoading(false);
+        return;
+      }
+      const propIds = itemsData.map((r) => r.prop_id);
+      const { data: propsData, error: propsErr } = await supabase
+        .from("props")
+        .select("id, title, description, location, category, job, quantity, photo, code, created_at")
+        .in("id", propIds);
+      if (cancelled) return;
+      const orderMap = new Map(itemsData.map((r, i) => [r.prop_id, i]));
+      const sorted = (propsData || []).slice().sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+      setProps(sorted);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [listId]);
+
+  const copyLink = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-cream-100 flex items-center justify-center p-6">
+        <Loader2 className="h-10 w-10 animate-spin text-ink-400" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="min-h-screen bg-cream-100 flex flex-col items-center justify-center p-6">
+        <p className="font-sans text-ink-700">{error}</p>
+        {onBack && (
+          <Button variant="outline" className="mt-4 rounded-2xl" onClick={onBack}>
+            Back to app
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-cream-100 text-ink-900">
+      <div className="mx-auto max-w-4xl px-4 py-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="font-sans text-2xl font-semibold text-ink-900">
+              {list?.name || "Shared list"}
+            </h1>
+            <p className="mt-1 text-sm text-ink-600">
+              {props.length} {props.length === 1 ? "prop" : "props"}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="primary"
+              className="rounded-2xl"
+              onClick={copyLink}
+            >
+              <Link2 className="mr-2 h-4 w-4" />
+              {copied ? "Copied!" : "Copy link"}
+            </Button>
+            {onBack && (
+              <Button type="button" variant="outline" className="rounded-2xl" onClick={onBack}>
+                Back to app
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {props.map((item) => (
+            <ItemCard key={item.id} item={item} onClick={setSelectedItem} />
+          ))}
+        </div>
+        {props.length === 0 && (
+          <p className="mt-8 text-center font-sans text-ink-600">This list has no props yet.</p>
+        )}
+      </div>
+      {selectedItem && (
+        <PropDetailModal
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+          onDelete={() => {}}
+          onEdit={() => {}}
+          onOpenLightbox={setLightboxImage}
+          canEdit={false}
+        />
+      )}
+      <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
+    </div>
+  );
+}
+
+function AddToListModal({ open, item, onClose }) {
+  const [newListName, setNewListName] = useState("");
+  const [myLists, setMyLists] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createdListId, setCreatedListId] = useState(null);
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [addingId, setAddingId] = useState(null);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!open || !item || !supabase) return;
+    setCreatedListId(null);
+    setShareUrl("");
+    setNewListName("");
+    setMessage("");
+    const ids = JSON.parse(localStorage.getItem(SHARE_LIST_IDS_KEY) || "[]");
+    if (!ids.length) {
+      setMyLists([]);
+      return;
+    }
+    setLoading(true);
+    supabase
+      .from("shared_lists")
+      .select("id, name")
+      .in("id", ids)
+      .then(({ data }) => {
+        setMyLists(data || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [open, item?.id]);
+
+  const createList = async () => {
+    if (!item || !supabase) return;
+    setCreating(true);
+    const { data: listRow, error: listErr } = await supabase
+      .from("shared_lists")
+      .insert({ name: newListName.trim() || null })
+      .select("id")
+      .single();
+    if (listErr || !listRow) {
+      setMessage("Could not create list. Try again.");
+      setCreating(false);
+      return;
+    }
+    const listId = listRow.id;
+    const { error: itemErr } = await supabase
+      .from("shared_list_items")
+      .insert({ list_id: listId, prop_id: item.id });
+    if (itemErr) {
+      setMessage("List created but could not add prop. Try adding it from the list.");
+    }
+    const ids = JSON.parse(localStorage.getItem(SHARE_LIST_IDS_KEY) || "[]");
+    if (!ids.includes(listId)) {
+      localStorage.setItem(SHARE_LIST_IDS_KEY, JSON.stringify([...ids, listId]));
+    }
+    setCreatedListId(listId);
+    setShareUrl(`${window.location.origin}${window.location.pathname}#/share/${listId}`);
+    setMyLists((prev) => [...prev, { id: listId, name: newListName.trim() || "Untitled list" }]);
+    setCreating(false);
+  };
+
+  const addToList = async (listId) => {
+    if (!item || !supabase) return;
+    setAddingId(listId);
+    const { error } = await supabase
+      .from("shared_list_items")
+      .upsert({ list_id: listId, prop_id: item.id }, { onConflict: "list_id,prop_id" });
+    setAddingId(null);
+    if (error) setMessage("Could not add to list.");
+    else setMessage("Added to list.");
+  };
+
+  const copyShareLink = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  if (!open) return null;
+  return (
+    <Modal open={true} onClose={onClose} title="Add to list">
+      <div className="space-y-6">
+        {message && (
+          <p className={cn("text-sm", message.startsWith("Could") ? "text-red-600" : "text-ink-700")}>
+            {message}
+          </p>
+        )}
+        {!createdListId ? (
+          <>
+            <div>
+              <Label className="block mb-2">Create new list</Label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  placeholder="List name (optional)"
+                  className="h-11 flex-1 rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 placeholder:text-ink-500 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
+                />
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="rounded-2xl shrink-0"
+                  onClick={createList}
+                  disabled={creating}
+                >
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create"}
+                </Button>
+              </div>
+            </div>
+            {loading ? (
+              <p className="text-sm text-ink-600">Loading your lists…</p>
+            ) : myLists.length > 0 ? (
+              <div>
+                <Label className="block mb-2">Add to existing list</Label>
+                <ul className="space-y-2">
+                  {myLists.map((list) => (
+                    <li key={list.id} className="flex items-center justify-between rounded-2xl border border-ink-200 bg-cream-50 px-4 py-2">
+                      <span className="font-sans text-ink-900">{list.name || "Untitled list"}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="default"
+                        className="rounded-xl"
+                        onClick={() => addToList(list.id)}
+                        disabled={addingId === list.id}
+                      >
+                        {addingId === list.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="rounded-2xl border border-ink-200 bg-cream-100 p-4">
+            <p className="font-sans text-sm font-medium text-ink-800">List created. Share this link:</p>
+            <div className="mt-2 flex gap-2">
+              <input
+                type="text"
+                readOnly
+                value={shareUrl}
+                className="flex-1 rounded-xl border border-ink-200 bg-cream-50 px-3 py-2 font-mono text-sm text-ink-700"
+              />
+              <Button type="button" variant="primary" className="rounded-xl shrink-0" onClick={copyShareLink}>
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
 
 function PropRoomInventoryApp({ isEditor = true }) {
   const [items, setItems] = useState(starterItems);
@@ -806,6 +1134,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
   const [sortBy, setSortBy] = useState("date");
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
   const [photoToCrop, setPhotoToCrop] = useState(null);
+  const [addToListItem, setAddToListItem] = useState(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -960,10 +1289,14 @@ function PropRoomInventoryApp({ isEditor = true }) {
     setForm((current) => ({ ...current, job: title }));
   };
 
+  const GENERAL_INVENTORY = "General Inventory";
+
   const filteredItems = useMemo(() => {
     const q = search.toLowerCase().trim();
+    const jobFiltered =
+      isEditor ? items : items.filter((item) => (item.job || "").trim() === GENERAL_INVENTORY);
 
-    const filtered = items.filter((item) => {
+    const filtered = jobFiltered.filter((item) => {
       const matchesSection =
         activeSection === "All Props" ||
         (item.category || "").toLowerCase() === activeSection.toLowerCase();
@@ -979,17 +1312,18 @@ function PropRoomInventoryApp({ isEditor = true }) {
       return matchesSection && matchesQuery;
     });
 
+    const effectiveSort = isEditor ? sortBy : sortBy === "location" ? "date" : sortBy;
     const sorted = [...filtered].sort((a, b) => {
-      if (sortBy === "title")
+      if (effectiveSort === "title")
         return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
-      if (sortBy === "location")
+      if (effectiveSort === "location")
         return (a.location || "").localeCompare(b.location || "", undefined, { sensitivity: "base" });
       const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
       const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
       return dateB - dateA;
     });
     return sorted;
-  }, [items, search, activeSection, sortBy]);
+  }, [items, search, activeSection, sortBy, isEditor]);
 
   const revokePhotoUrl = (url) => {
     if (typeof url === "string" && url.startsWith("blob:")) {
@@ -1334,12 +1668,19 @@ function PropRoomInventoryApp({ isEditor = true }) {
           onEdit={openEditForm}
           onOpenLightbox={setLightboxImage}
           canEdit={isEditor}
+          onAddToList={(it) => setAddToListItem(it)}
+          showLocation={isEditor}
         />
 
         <PhotoCropModal
           src={photoToCrop}
           onComplete={handleCropComplete}
           onCancel={handleCropCancel}
+        />
+        <AddToListModal
+          open={!!addToListItem}
+          item={addToListItem}
+          onClose={() => setAddToListItem(null)}
         />
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
 
@@ -1725,14 +2066,14 @@ function PropRoomInventoryApp({ isEditor = true }) {
             {filteredItems.length} {filteredItems.length === 1 ? "prop" : "props"}
           </p>
           <select
-            value={sortBy}
+            value={isEditor ? sortBy : sortBy === "location" ? "date" : sortBy}
             onChange={(e) => setSortBy(e.target.value)}
             className="h-9 rounded-xl border border-ink-200 bg-cream-50 px-3 font-sans text-sm text-ink-800 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
             aria-label="Sort by"
           >
             <option value="date">Date added</option>
             <option value="title">Title</option>
-            <option value="location">Location</option>
+            {isEditor && <option value="location">Location</option>}
           </select>
           {filteredItems.length > 0 && (
             <Button
@@ -1752,7 +2093,13 @@ function PropRoomInventoryApp({ isEditor = true }) {
         {filteredItems.length > 0 ? (
           <div className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {filteredItems.map((item) => (
-              <ItemCard key={item.id} item={item} onClick={setSelectedItem} />
+              <ItemCard
+                key={item.id}
+                item={item}
+                onClick={setSelectedItem}
+                onAddToList={supabase ? (it) => setAddToListItem(it) : undefined}
+                showLocation={isEditor}
+              />
             ))}
           </div>
         ) : (
@@ -1765,17 +2112,19 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 No props here
               </h3>
               <p className="mt-2 font-sans text-sm text-ink-600">
-                Try another search, switch tabs, or add a prop.
+                Try another search or switch tabs.
               </p>
-              <Button
-                type="button"
-                variant="primary"
-                className="mt-6 rounded-2xl"
-                onClick={openAddForm}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add prop/surface
-              </Button>
+              {isEditor && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="mt-6 rounded-2xl"
+                  onClick={openAddForm}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add prop/surface
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1825,4 +2174,25 @@ function AppWithAuth() {
   return <PropRoomInventoryApp isEditor={isEditor} />;
 }
 
-export default AppWithAuth;
+const SHARE_LIST_IDS_KEY = "propstagram_share_list_ids";
+
+function App() {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const shareMatch = hash.match(/^#\/share\/([a-f0-9-]{36})$/i);
+  if (shareMatch) {
+    return (
+      <ShareView
+        listId={shareMatch[1]}
+        onBack={() => { window.location.hash = ""; }}
+      />
+    );
+  }
+  return <AppWithAuth />;
+}
+
+export default App;

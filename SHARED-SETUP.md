@@ -135,6 +135,41 @@ insert into public.sections (name, sort_order) values
 on conflict (name) do nothing;
 ```
 
+### 2c. Shared lists (shareable links)
+
+Run this in the SQL Editor so users can add props to lists and share them via link:
+
+```sql
+create table if not exists public.shared_lists (
+  id uuid primary key default gen_random_uuid(),
+  name text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.shared_list_items (
+  list_id uuid not null references public.shared_lists (id) on delete cascade,
+  prop_id uuid not null references public.props (id) on delete cascade,
+  sort_order int not null default 0,
+  primary key (list_id, prop_id)
+);
+
+alter table public.shared_lists enable row level security;
+alter table public.shared_list_items enable row level security;
+
+create policy "Allow public read shared_lists"
+  on public.shared_lists for select using (true);
+create policy "Allow public insert shared_lists"
+  on public.shared_lists for insert with check (true);
+create policy "Allow public read shared_list_items"
+  on public.shared_list_items for select using (true);
+create policy "Allow public insert shared_list_items"
+  on public.shared_list_items for insert with check (true);
+create policy "Allow public delete shared_list_items"
+  on public.shared_list_items for delete using (true);
+create policy "Allow public update shared_list_items"
+  on public.shared_list_items for update using (true) with check (true);
+```
+
 ### 3. Create the storage bucket for photos
 
 1. Go to **Storage** in the left sidebar.
