@@ -160,6 +160,10 @@ create policy "Allow public read shared_lists"
   on public.shared_lists for select using (true);
 create policy "Allow public insert shared_lists"
   on public.shared_lists for insert with check (true);
+create policy "Allow public update shared_lists"
+  on public.shared_lists for update using (true) with check (true);
+create policy "Allow public delete shared_lists"
+  on public.shared_lists for delete using (true);
 create policy "Allow public read shared_list_items"
   on public.shared_list_items for select using (true);
 create policy "Allow public insert shared_list_items"

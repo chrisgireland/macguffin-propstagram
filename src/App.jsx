@@ -771,7 +771,7 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canE
               </div>
               {(item.length || item.width) ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-ink-500 font-medium">Dimensions:</span>
+                  <span className="text-ink-500 font-medium">Dimensions (in):</span>
                   <span>{[item.length, item.width].filter(Boolean).join(" × ")}</span>
                 </div>
               ) : null}
@@ -1174,49 +1174,62 @@ function MyListsModal({ open, onClose }) {
   const [lists, setLists] = useState([]);
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [editingListId, setEditingListId] = useState(null);
+  const [editingName, setEditingName] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const fetchLists = useCallback(async () => {
+    if (!supabase) return;
+    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
+    if (!ids.length) {
+      setLists([]);
+      return;
+    }
+    const { data: listsData } = await supabase
+      .from("shared_lists")
+      .select("id, name")
+      .in("id", ids);
+    if (!listsData?.length) {
+      setLists([]);
+      return;
+    }
+    const { data: itemsData } = await supabase
+      .from("shared_list_items")
+      .select("list_id, prop_id")
+      .in("list_id", ids);
+    const propIds = [...new Set((itemsData || []).map((r) => r.prop_id))];
+    const { data: propsData } = propIds.length
+      ? await supabase.from("props").select("id, title").in("id", propIds)
+      : { data: [] };
+    const propsById = new Map((propsData || []).map((p) => [p.id, p.title || "Untitled"]));
+    const itemsByListId = new Map();
+    for (const r of itemsData || []) {
+      if (!itemsByListId.has(r.list_id)) itemsByListId.set(r.list_id, []);
+      itemsByListId.get(r.list_id).push(propsById.get(r.prop_id) || "Untitled");
+    }
+    setLists(
+      listsData.map((list) => ({
+        id: list.id,
+        name: list.name || "Untitled list",
+        propTitles: itemsByListId.get(list.id) || [],
+      }))
+    );
+  }, []);
 
   useEffect(() => {
     if (!open || !supabase) return;
     setLists([]);
+    setEditingListId(null);
+    setConfirmDeleteId(null);
     const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
     if (!ids.length) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    (async () => {
-      const { data: listsData } = await supabase
-        .from("shared_lists")
-        .select("id, name")
-        .in("id", ids);
-      if (!listsData?.length) {
-        setLoading(false);
-        return;
-      }
-      const { data: itemsData } = await supabase
-        .from("shared_list_items")
-        .select("list_id, prop_id")
-        .in("list_id", ids);
-      const propIds = [...new Set((itemsData || []).map((r) => r.prop_id))];
-      const { data: propsData } = propIds.length
-        ? await supabase.from("props").select("id, title").in("id", propIds)
-        : { data: [] };
-      const propsById = new Map((propsData || []).map((p) => [p.id, p.title || "Untitled"]));
-      const itemsByListId = new Map();
-      for (const r of itemsData || []) {
-        if (!itemsByListId.has(r.list_id)) itemsByListId.set(r.list_id, []);
-        itemsByListId.get(r.list_id).push(propsById.get(r.prop_id) || "Untitled");
-      }
-      setLists(
-        listsData.map((list) => ({
-          id: list.id,
-          name: list.name || "Untitled list",
-          propTitles: itemsByListId.get(list.id) || [],
-        }))
-      );
-      setLoading(false);
-    })();
-  }, [open]);
+    fetchLists().then(() => setLoading(false));
+  }, [open, fetchLists]);
 
   const copyLink = (listId) => {
     const url = `${window.location.origin}${window.location.pathname}#/share/${listId}`;
@@ -1224,6 +1237,54 @@ function MyListsModal({ open, onClose }) {
       setCopiedId(listId);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  };
+
+  const startRename = (list, e) => {
+    e.stopPropagation();
+    setEditingListId(list.id);
+    setEditingName(list.name);
+  };
+
+  const saveRename = async (e) => {
+    e?.stopPropagation();
+    if (!editingListId || !supabase) return;
+    const name = editingName.trim() || "Untitled list";
+    const { error } = await supabase.from("shared_lists").update({ name }).eq("id", editingListId);
+    if (!error) {
+      setLists((prev) =>
+        prev.map((l) => (l.id === editingListId ? { ...l, name } : l))
+      );
+    }
+    setEditingListId(null);
+  };
+
+  const cancelRename = (e) => {
+    e?.stopPropagation();
+    setEditingListId(null);
+  };
+
+  const confirmDelete = (listId, e) => {
+    e?.stopPropagation();
+    setConfirmDeleteId(listId);
+  };
+
+  const cancelDelete = (e) => {
+    e?.stopPropagation();
+    setConfirmDeleteId(null);
+  };
+
+  const deleteList = async (listId, e) => {
+    e?.stopPropagation();
+    if (!supabase) return;
+    setDeletingId(listId);
+    const { error } = await supabase.from("shared_lists").delete().eq("id", listId);
+    setDeletingId(null);
+    setConfirmDeleteId(null);
+    if (!error) {
+      const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
+      localStorage.setItem(getListIdsKey(), JSON.stringify(ids.filter((id) => id !== listId)));
+      setLists((prev) => prev.filter((l) => l.id !== listId));
+    }
   };
 
   if (!open) return null;
@@ -1243,58 +1304,130 @@ function MyListsModal({ open, onClose }) {
             {lists.map((list) => (
               <li
                 key={list.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  window.location.hash = `#/share/${list.id}`;
-                  onClose();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    window.location.hash = `#/share/${list.id}`;
-                    onClose();
-                  }
-                }}
-                className="rounded-2xl border border-ink-200 bg-cream-50 p-4 cursor-pointer transition-colors hover:bg-cream-100 hover:border-ink-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                role={editingListId === list.id ? undefined : "button"}
+                tabIndex={editingListId === list.id ? undefined : 0}
+                onClick={
+                  editingListId === list.id
+                    ? undefined
+                    : () => {
+                        window.location.hash = `#/share/${list.id}`;
+                        onClose();
+                      }
+                }
+                onKeyDown={
+                  editingListId === list.id
+                    ? undefined
+                    : (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          window.location.hash = `#/share/${list.id}`;
+                          onClose();
+                        }
+                      }
+                }
+                className={cn(
+                  "rounded-2xl border border-ink-200 bg-cream-50 p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2",
+                  editingListId !== list.id && "cursor-pointer hover:bg-cream-100 hover:border-ink-300"
+                )}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-sans font-semibold text-ink-900">
-                      {list.name}
-                    </h3>
-                    <p className="mt-1 text-sm text-ink-600">
-                      {list.propTitles.length} {list.propTitles.length === 1 ? "prop" : "props"}
-                    </p>
-                    {list.propTitles.length > 0 && (
-                      <ul className="mt-2 space-y-1 text-sm text-ink-700">
-                        {list.propTitles.map((title, i) => (
-                          <li key={i} className="truncate">• {title}</li>
-                        ))}
-                      </ul>
-                    )}
+                {confirmDeleteId === list.id ? (
+                  <div className="flex flex-wrap items-center gap-2 py-1" onClick={(e) => e.stopPropagation()}>
+                    <span className="font-sans text-sm text-ink-700">Delete this list?</span>
+                    <Button type="button" variant="outline" size="default" className="rounded-xl" onClick={(e) => deleteList(list.id, e)}>
+                      Delete
+                    </Button>
+                    <Button type="button" variant="ghost" size="default" className="rounded-xl" onClick={cancelDelete}>
+                      Cancel
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="default"
-                    className="rounded-xl shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      copyLink(list.id);
-                    }}
-                    aria-label="Copy share link"
-                  >
-                    {copiedId === list.id ? (
-                      "Copied!"
-                    ) : (
-                      <>
-                        <Link2 className="mr-1.5 h-4 w-4" />
-                        Share
-                      </>
-                    )}
-                  </Button>
-                </div>
+                ) : editingListId === list.id ? (
+                  <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="text"
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && saveRename(e)}
+                      className="h-9 flex-1 min-w-[120px] rounded-xl border border-ink-200 bg-cream-50 px-3 font-sans text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
+                      placeholder="List name"
+                      autoFocus
+                    />
+                    <Button type="button" variant="primary" size="default" className="rounded-xl shrink-0" onClick={saveRename}>
+                      Save
+                    </Button>
+                    <Button type="button" variant="ghost" size="default" className="rounded-xl shrink-0" onClick={cancelRename}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-sans font-semibold text-ink-900">
+                          {list.name}
+                        </h3>
+                        <p className="mt-1 text-sm text-ink-600">
+                          {list.propTitles.length} {list.propTitles.length === 1 ? "prop" : "props"}
+                        </p>
+                        {list.propTitles.length > 0 && (
+                          <ul className="mt-2 space-y-1 text-sm text-ink-700">
+                            {list.propTitles.map((title, i) => (
+                              <li key={i} className="truncate">• {title}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="rounded-xl text-ink-600 hover:text-ink-900"
+                          onClick={(e) => startRename(list, e)}
+                          aria-label="Rename list"
+                          title="Rename list"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={(e) => confirmDelete(list.id, e)}
+                          disabled={deletingId === list.id}
+                          aria-label="Delete list"
+                          title="Delete list"
+                        >
+                          {deletingId === list.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="default"
+                          className="rounded-xl shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyLink(list.id);
+                          }}
+                          aria-label="Copy share link"
+                        >
+                          {copiedId === list.id ? (
+                            "Copied!"
+                          ) : (
+                            <>
+                              <Link2 className="mr-1.5 h-4 w-4" />
+                              Share
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -1314,7 +1447,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
   const [selectedItem, setSelectedItem] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
-  const [sortBy, setSortBy] = useState("date");
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
   const [photoToCrop, setPhotoToCrop] = useState(null);
   const [addToListItem, setAddToListItem] = useState(null);
@@ -1496,18 +1628,13 @@ function PropRoomInventoryApp({ isEditor = true }) {
       return matchesSection && matchesQuery;
     });
 
-    const effectiveSort = isEditor ? sortBy : sortBy === "location" ? "date" : sortBy;
     const sorted = [...filtered].sort((a, b) => {
-      if (effectiveSort === "title")
-        return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
-      if (effectiveSort === "location")
-        return (a.location || "").localeCompare(b.location || "", undefined, { sensitivity: "base" });
       const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
       const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
       return dateB - dateA;
     });
     return sorted;
-  }, [items, search, activeSection, sortBy, isEditor]);
+  }, [items, search, activeSection, isEditor]);
 
   const categoryThumbnails = useMemo(() => {
     const jobFiltered =
@@ -1968,19 +2095,19 @@ function PropRoomInventoryApp({ isEditor = true }) {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="block mb-1.5">Length (L)</Label>
+                <Label className="block mb-1.5">Length (L) (in)</Label>
                 <Input
                   value={form.length}
                   onChange={(e) => setForm({ ...form, length: e.target.value })}
-                  placeholder="e.g. 24 in"
+                  placeholder="e.g. 24"
                 />
               </div>
               <div>
-                <Label className="block mb-1.5">Width (W)</Label>
+                <Label className="block mb-1.5">Width (W) (in)</Label>
                 <Input
                   value={form.width}
                   onChange={(e) => setForm({ ...form, width: e.target.value })}
-                  placeholder="e.g. 18 in"
+                  placeholder="e.g. 18"
                 />
               </div>
             </div>
@@ -2241,21 +2368,11 @@ function PropRoomInventoryApp({ isEditor = true }) {
           </span>
         </div>
 
-        {/* Results line: count, sort, export */}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        {/* Results line: count */}
+        <div className="mt-4">
           <p className="font-sans text-sm text-ink-600">
             {filteredItems.length} {filteredItems.length === 1 ? "prop" : "props"}
           </p>
-          <select
-            value={isEditor ? sortBy : sortBy === "location" ? "date" : sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="h-9 rounded-xl border border-ink-200 bg-cream-50 px-3 font-sans text-sm text-ink-800 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
-            aria-label="Sort by"
-          >
-            <option value="date">Date added</option>
-            <option value="title">Title</option>
-            {isEditor && <option value="location">Location</option>}
-          </select>
         </div>
 
         {/* Item grid or empty state */}
