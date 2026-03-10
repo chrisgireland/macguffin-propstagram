@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactCrop, { centerCrop, convertToPixelCrop } from "react-image-crop";
+import ReactCrop, { convertToPixelCrop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import {
   Plus,
@@ -652,9 +652,8 @@ function PhotoCropModal({ src, onComplete, onCancel }) {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [onCancel]);
 
-  const onImageLoad = (e) => {
-    const { width, height } = e.currentTarget;
-    setCrop(centerCrop({ unit: "%", width: 80, height: 80 }, width, height));
+  const onImageLoad = () => {
+    setCrop({ unit: "%", x: 0, y: 0, width: 100, height: 100 });
   };
 
   const handleApply = async () => {
@@ -674,16 +673,16 @@ function PhotoCropModal({ src, onComplete, onCancel }) {
       <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl border border-ink-200 bg-cream-50 shadow-soft-lg" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-ink-200 px-4 py-3 font-sans font-medium text-ink-900">Crop photo</div>
         <div className="overflow-auto p-4">
-          <ReactCrop crop={crop} onChange={(c) => setCrop(c)} aspect={4 / 3} className="max-h-[60vh]">
+          <ReactCrop crop={crop} onChange={(c) => setCrop(c)} className="max-h-[60vh]">
             <img ref={imgRef} src={src} alt="Crop" style={{ maxHeight: "60vh", width: "auto" }} onLoad={onImageLoad} />
           </ReactCrop>
         </div>
         <div className="flex gap-3 border-t border-ink-200 p-4">
           <Button type="button" variant="outline" className="rounded-2xl flex-1" onClick={onCancel} disabled={applying}>
-            Cancel
+            Back
           </Button>
           <Button type="button" variant="primary" className="rounded-2xl flex-1" onClick={handleApply} disabled={applying || !crop}>
-            {applying ? "Applying…" : "Use crop"}
+            {applying ? "Accepting…" : "Accept"}
           </Button>
         </div>
       </div>
