@@ -13,7 +13,6 @@ import {
   Pencil,
   Download,
   Map as MapIcon,
-  LogOut,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
@@ -647,7 +646,7 @@ function Lightbox({ imageUrl, onClose }) {
 }
 
 
-function PropRoomInventoryApp({ onLogout, showLogout }) {
+function PropRoomInventoryApp() {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
   const [activeSection, setActiveSection] = useState("All Props");
@@ -1111,33 +1110,19 @@ function PropRoomInventoryApp({ onLogout, showLogout }) {
               Propstagram
             </span>
           </h1>
-          <div className="flex items-center gap-2">
-            {showLogout && onLogout ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="default"
-                className="rounded-2xl text-ink-600"
-                onClick={onLogout}
-              >
-                <LogOut className="mr-1.5 h-4 w-4" />
-                Log out
-              </Button>
-            ) : null}
-            <Button
-              onClick={() => {
-                setEditingId(null);
-                setSaveError(null);
-                setIsModalOpen(true);
-              }}
-              variant="primary"
-              size="default"
-              className="rounded-2xl shrink-0"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Prop/Surface
-            </Button>
-          </div>
+          <Button
+            onClick={() => {
+              setEditingId(null);
+              setSaveError(null);
+              setIsModalOpen(true);
+            }}
+            variant="primary"
+            size="default"
+            className="rounded-2xl shrink-0"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Prop/Surface
+          </Button>
         </div>
 
         <PropDetailModal
@@ -1619,15 +1604,7 @@ function AppWithAuth() {
     return <LoginPage onSuccess={() => setAuthed(true)} />;
   }
 
-  return (
-    <PropRoomInventoryApp
-      showLogout={protected_}
-      onLogout={() => {
-        clearAuthenticated();
-        setAuthed(false);
-      }}
-    />
-  );
+  return <PropRoomInventoryApp />;
 }
 
 export default AppWithAuth;

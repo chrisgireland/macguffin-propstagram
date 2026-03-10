@@ -210,7 +210,7 @@ You can require a password to open the app. Only the **hash** of the password is
      - Value: the same hex string  
      Then redeploy.
 
-4. Restart the dev server (or refresh the deployed app). The app will show a login page; after entering the correct password, the session lasts until the browser tab is closed. Use **Log out** in the header to sign out.
+4. Restart the dev server (or refresh the deployed app). The app will show a login page; after entering the correct password, the session lasts until the browser tab is closed or after 10 minutes of inactivity.
 
 If `VITE_PASSWORD_HASH` is not set, the app is not password-protected and anyone can open it.
 
