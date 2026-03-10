@@ -1243,7 +1243,20 @@ function MyListsModal({ open, onClose }) {
             {lists.map((list) => (
               <li
                 key={list.id}
-                className="rounded-2xl border border-ink-200 bg-cream-50 p-4"
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  window.location.hash = `#/share/${list.id}`;
+                  onClose();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    window.location.hash = `#/share/${list.id}`;
+                    onClose();
+                  }
+                }}
+                className="rounded-2xl border border-ink-200 bg-cream-50 p-4 cursor-pointer transition-colors hover:bg-cream-100 hover:border-ink-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -1266,7 +1279,11 @@ function MyListsModal({ open, onClose }) {
                     variant="primary"
                     size="default"
                     className="rounded-xl shrink-0"
-                    onClick={() => copyLink(list.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyLink(list.id);
+                    }}
+                    aria-label="Copy share link"
                   >
                     {copiedId === list.id ? (
                       "Copied!"
