@@ -1054,6 +1054,7 @@ export default function PropRoomInventoryApp() {
                 {saveError}
               </p>
             )}
+              </div>
             </div>
 
             <div className="sticky bottom-0 mt-4 pt-4 border-t border-ink-200 bg-cream-50 flex gap-3">
