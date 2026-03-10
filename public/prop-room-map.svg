@@ -46,6 +46,12 @@
   <!-- Island / table -->
   <rect x="280" y="320" width="240" height="80" fill="#ddd6cc" stroke="#8a7f72" stroke-width="1" rx="4"/>
 
-  <!-- Label -->
-  <text x="400" y="485" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#6b5f52">Prop room  replace this with a photo of your shelving (same filename: prop-room-map.svg or .png)</text>
+  <!-- Labels (placeholder – so you can see which shelf is which) -->
+  <text x="130" y="68" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#5a5046">Left</text>
+  <text x="400" y="68" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#5a5046">Center</text>
+  <text x="670" y="68" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#5a5046">Right</text>
+  <text x="400" y="368" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#5a5046">Island</text>
+
+  <!-- Footer -->
+  <text x="400" y="485" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#6b5f52">Placeholder floor plan — replace with your own (prop-room-map.svg or .png)</text>
 </svg>

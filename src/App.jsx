@@ -16,15 +16,33 @@ import {
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
-// Custom prop room map: one image + pins at (map_x, map_y) in 0–1 coordinates
+// Custom prop room map: one image; optional pins or shelf highlight (0–1 coords)
 const ROOM_MAP_URL = "/prop-room-map.svg";
 
-function RoomMap({ items, onSelectItem, clickToSet, className = "" }) {
+// Shelf regions matching placeholder SVG (viewBox 800×500), normalized to 0–1: [x, y, width, height]
+const SHELF_REGIONS = [
+  [0.05, 0.12, 0.225, 0.024], [0.05, 0.2, 0.225, 0.024], [0.05, 0.28, 0.225, 0.024], [0.05, 0.36, 0.225, 0.024], [0.05, 0.44, 0.225, 0.024],
+  [0.325, 0.12, 0.35, 0.024], [0.325, 0.2, 0.35, 0.024], [0.325, 0.28, 0.35, 0.024], [0.325, 0.36, 0.35, 0.024], [0.325, 0.44, 0.35, 0.024],
+  [0.725, 0.12, 0.225, 0.024], [0.725, 0.2, 0.225, 0.024], [0.725, 0.28, 0.225, 0.024], [0.725, 0.36, 0.225, 0.024], [0.725, 0.44, 0.225, 0.024],
+  [0.775, 0.56, 0.015, 0.32], [0.825, 0.56, 0.015, 0.32], [0.875, 0.56, 0.015, 0.32],
+  [0.35, 0.64, 0.3, 0.16],
+];
+
+function findShelfAt(map_x, map_y) {
+  if (typeof map_x !== "number" || typeof map_y !== "number") return null;
+  for (const [x, y, w, h] of SHELF_REGIONS) {
+    if (map_x >= x && map_x <= x + w && map_y >= y && map_y <= y + h) return [x, y, w, h];
+  }
+  return null;
+}
+
+function RoomMap({ items, onSelectItem, clickToSet, highlightPoint, className = "" }) {
   const containerRef = useRef(null);
 
   const hasMapPos = (item) =>
     item != null && typeof item.map_x === "number" && typeof item.map_y === "number";
   const withPos = items.filter(hasMapPos);
+  const highlightShelf = highlightPoint ? findShelfAt(highlightPoint.map_x, highlightPoint.map_y) : null;
 
   const handleClick = (e) => {
     if (!clickToSet || !containerRef.current) return;
@@ -49,7 +67,29 @@ function RoomMap({ items, onSelectItem, clickToSet, className = "" }) {
         draggable={false}
         style={{ pointerEvents: clickToSet ? "none" : "auto" }}
       />
-      {withPos.map((item) => (
+      {highlightShelf && (
+        <div
+          className="absolute border-2 border-red-600 bg-red-500/50 pointer-events-none"
+          style={{
+            left: `${highlightShelf[0] * 100}%`,
+            top: `${highlightShelf[1] * 100}%`,
+            width: `${highlightShelf[2] * 100}%`,
+            height: `${highlightShelf[3] * 100}%`,
+          }}
+          aria-hidden
+        />
+      )}
+      {highlightPoint && !highlightShelf && (
+        <div
+          className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-red-600 bg-red-500/70 pointer-events-none"
+          style={{
+            left: `${highlightPoint.map_x * 100}%`,
+            top: `${highlightPoint.map_y * 100}%`,
+          }}
+          aria-hidden
+        />
+      )}
+      {!highlightPoint && withPos.map((item) => (
         <button
           key={item.id}
           type="button"
@@ -318,7 +358,7 @@ function ItemCard({ item, onClick }) {
   );
 }
 
-function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, onViewOnMap }) {
+function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   useEffect(() => {
@@ -461,26 +501,9 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, onVi
 
             {typeof item.map_x === "number" && typeof item.map_y === "number" ? (
               <div className="mt-6">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="font-sans text-sm font-medium text-ink-700">Location on map</span>
-                  {onViewOnMap ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="default"
-                      className="rounded-xl"
-                      onClick={() => {
-                        onViewOnMap(item);
-                        onClose();
-                      }}
-                    >
-                      <MapIcon className="mr-1.5 h-4 w-4" />
-                      View on map
-                    </Button>
-                  ) : null}
-                </div>
+                <span className="font-sans text-sm font-medium text-ink-700 block mb-2">Location on floor plan</span>
                 <div className="w-full rounded-2xl overflow-hidden border border-ink-200" style={{ aspectRatio: "8/5" }}>
-                  <RoomMap items={[item]} />
+                  <RoomMap highlightPoint={{ map_x: item.map_x, map_y: item.map_y }} />
                 </div>
               </div>
             ) : null}
@@ -534,9 +557,7 @@ export default function PropRoomInventoryApp() {
   const [editingId, setEditingId] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
   const [sortBy, setSortBy] = useState("date");
-  const [viewMode, setViewMode] = useState("list");
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
-  const [mapFocusItemId, setMapFocusItemId] = useState(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -989,11 +1010,6 @@ export default function PropRoomInventoryApp() {
           onDelete={deleteItem}
           onEdit={openEditForm}
           onOpenLightbox={setLightboxImage}
-          onViewOnMap={(it) => {
-            setViewMode("map");
-            setMapFocusItemId(it?.id ?? null);
-            setSelectedItem(null);
-          }}
         />
 
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
@@ -1342,54 +1358,6 @@ export default function PropRoomInventoryApp() {
           })}
         </div>
 
-        {/* List / Map view toggle */}
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            onClick={() => { setViewMode("list"); setMapFocusItemId(null); }}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 font-sans text-sm font-medium transition-colors",
-              viewMode === "list"
-                ? "bg-ink-900 text-cream-50"
-                : "bg-cream-200/80 text-ink-700 hover:bg-cream-300"
-            )}
-          >
-            <Package2 className="h-4 w-4" />
-            List
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("map")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 font-sans text-sm font-medium transition-colors",
-              viewMode === "map"
-                ? "bg-ink-900 text-cream-50"
-                : "bg-cream-200/80 text-ink-700 hover:bg-cream-300"
-            )}
-          >
-            <MapIcon className="h-4 w-4" />
-            Map
-          </button>
-        </div>
-
-        {viewMode === "map" ? (
-          <div className="mt-6">
-            <div className="w-full max-w-4xl mx-auto" style={{ aspectRatio: "8/5" }}>
-              <RoomMap
-                items={filteredItems}
-                onSelectItem={setSelectedItem}
-              />
-            </div>
-            {filteredItems.filter(
-              (i) => typeof i.map_x !== "number" || typeof i.map_y !== "number"
-            ).length > 0 && (
-              <p className="mt-3 text-sm text-ink-600">
-                Some props don’t have a map location. Edit a prop and use “Set location on map” to add one.
-              </p>
-            )}
-          </div>
-        ) : (
-        <>
         {/* Results line: count, sort, export */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <p className="font-sans text-sm text-ink-600">
@@ -1453,8 +1421,6 @@ export default function PropRoomInventoryApp() {
               </Button>
             </CardContent>
           </Card>
-        )}
-        </>
         )}
         </>
         )}
