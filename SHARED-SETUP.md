@@ -186,6 +186,36 @@ create policy "Allow public read"
 
 ---
 
+## Password protection (optional)
+
+You can require a password to open the app. Only the **hash** of the password is stored (in env), not the password itself.
+
+### How to set the password
+
+1. **Choose a password** (e.g. `MySecret123`).
+
+2. **Generate its SHA-256 hash** (hex string). In a terminal:
+   ```bash
+   echo -n 'MySecret123' | shasum -a 256 | cut -d' ' -f1
+   ```
+   (Use your password instead of `MySecret123`. The `-n` is important so the hash doesn’t include a newline.)
+
+3. **Put the hash in your env:**
+   - **Local:** In `.env.local` add a line:
+     ```
+     VITE_PASSWORD_HASH=the_hex_string_you_got
+     ```
+   - **Vercel:** In the project’s **Settings → Environment Variables**, add:
+     - Name: `VITE_PASSWORD_HASH`
+     - Value: the same hex string  
+     Then redeploy.
+
+4. Restart the dev server (or refresh the deployed app). The app will show a login page; after entering the correct password, the session lasts until the browser tab is closed. Use **Log out** in the header to sign out.
+
+If `VITE_PASSWORD_HASH` is not set, the app is not password-protected and anyone can open it.
+
+---
+
 ## Part 2: Deploy so others can access the app (Vercel)
 
 ### 1. Push your code to GitHub

@@ -13,8 +13,105 @@ import {
   Pencil,
   Download,
   Map as MapIcon,
+  LogOut,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
+
+const AUTH_SESSION_KEY = "propstagram_authed";
+const PASSWORD_HASH_ENV = "VITE_PASSWORD_HASH";
+
+function isPasswordProtectionEnabled() {
+  const hash = import.meta.env[PASSWORD_HASH_ENV];
+  return typeof hash === "string" && hash.trim().length > 0;
+}
+
+function isAuthenticated() {
+  return sessionStorage.getItem(AUTH_SESSION_KEY) === "1";
+}
+
+function setAuthenticated() {
+  sessionStorage.setItem(AUTH_SESSION_KEY, "1");
+}
+
+function clearAuthenticated() {
+  sessionStorage.removeItem(AUTH_SESSION_KEY);
+}
+
+async function hashPassword(password) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function checkPassword(enteredPassword, expectedHashHex) {
+  if (!enteredPassword || !expectedHashHex) return false;
+  const enteredHash = await hashPassword(enteredPassword);
+  return enteredHash.toLowerCase() === String(expectedHashHex).trim().toLowerCase();
+}
+
+function LoginPage({ onSuccess }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const expectedHash = import.meta.env[PASSWORD_HASH_ENV];
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSubmitting(true);
+    const ok = await checkPassword(password, expectedHash);
+    setSubmitting(false);
+    if (ok) {
+      setAuthenticated();
+      onSuccess();
+    } else {
+      setError("Wrong password");
+      setPassword("");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-cream-100 flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <img
+            src="/macguffin-logo.png"
+            alt="MacGuffin"
+            className="h-10 w-auto mx-auto object-contain"
+            width={235}
+            height={120}
+          />
+          <p className="mt-3 font-sans text-ink-600">Propstagram</p>
+        </div>
+        <form onSubmit={handleSubmit} className="rounded-3xl border border-ink-200 bg-cream-50 p-6 shadow-soft">
+          <label htmlFor="login-password" className="block text-sm font-medium text-ink-700 mb-2">
+            Password
+          </label>
+          <input
+            id="login-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter password"
+            autoFocus
+            autoComplete="current-password"
+            className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 placeholder:text-ink-500 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
+          />
+          {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="mt-4 w-full h-11 rounded-2xl bg-ink-900 text-cream-50 font-medium hover:bg-ink-800 focus:outline-none focus:ring-2 focus:ring-ink-700 disabled:opacity-50"
+          >
+            {submitting ? "Checking…" : "Log in"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 // Custom prop room map: shelf-based selection (hover to highlight, click to select shelf)
 const ROOM_MAP_URL = "/prop-room-map.svg";
@@ -550,7 +647,7 @@ function Lightbox({ imageUrl, onClose }) {
 }
 
 
-export default function PropRoomInventoryApp() {
+function PropRoomInventoryApp({ onLogout, showLogout }) {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
   const [activeSection, setActiveSection] = useState("All Props");
@@ -1001,7 +1098,7 @@ export default function PropRoomInventoryApp() {
 
       <div className="relative mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:py-8">
         {/* Header: MacGuffin logo + Propstagram */}
-        <div className="mb-8 flex items-center justify-between gap-4">
+        <div className="mb-8 flex items-center justify-between gap-4 flex-wrap">
           <h1 className="flex items-center gap-3">
             <img
               src="/macguffin-logo.png"
@@ -1014,19 +1111,33 @@ export default function PropRoomInventoryApp() {
               Propstagram
             </span>
           </h1>
-          <Button
-            onClick={() => {
-              setEditingId(null);
-              setSaveError(null);
-              setIsModalOpen(true);
-            }}
-            variant="primary"
-            size="default"
-            className="rounded-2xl shrink-0"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Prop/Surface
-          </Button>
+          <div className="flex items-center gap-2">
+            {showLogout && onLogout ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="default"
+                className="rounded-2xl text-ink-600"
+                onClick={onLogout}
+              >
+                <LogOut className="mr-1.5 h-4 w-4" />
+                Log out
+              </Button>
+            ) : null}
+            <Button
+              onClick={() => {
+                setEditingId(null);
+                setSaveError(null);
+                setIsModalOpen(true);
+              }}
+              variant="primary"
+              size="default"
+              className="rounded-2xl shrink-0"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Prop/Surface
+            </Button>
+          </div>
         </div>
 
         <PropDetailModal
@@ -1472,3 +1583,28 @@ export default function PropRoomInventoryApp() {
     </div>
   );
 }
+
+function AppWithAuth() {
+  const [authed, setAuthed] = useState(() => isAuthenticated());
+  const protected_ = isPasswordProtectionEnabled();
+
+  useEffect(() => {
+    if (!protected_) setAuthed(true);
+  }, [protected_]);
+
+  if (protected_ && !authed) {
+    return <LoginPage onSuccess={() => setAuthed(true)} />;
+  }
+
+  return (
+    <PropRoomInventoryApp
+      showLogout={protected_}
+      onLogout={() => {
+        clearAuthenticated();
+        setAuthed(false);
+      }}
+    />
+  );
+}
+
+export default AppWithAuth;
