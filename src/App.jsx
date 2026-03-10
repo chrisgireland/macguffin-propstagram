@@ -50,9 +50,12 @@ function parseLogins() {
     for (const part of loginsRaw.split(",")) {
       const tri = part.trim().split(":");
       if (tri.length >= 3) {
-        const [username, hash, role] = tri;
+        const [u, h, r] = tri;
+        const username = u?.trim() ?? "";
+        const hash = h?.trim() ?? "";
+        const role = (r?.trim() ?? "").toLowerCase();
         if (username && hash && (role === "client" || role === "editor"))
-          entries.push({ username: username.trim().toLowerCase(), passwordHash: hash.trim().toLowerCase(), role });
+          entries.push({ username: username.toLowerCase(), passwordHash: hash.toLowerCase(), role });
       }
     }
     if (entries.length) return entries;
@@ -112,16 +115,22 @@ function LoginPage({ onSuccess }) {
     e.preventDefault();
     setError("");
     setSubmitting(true);
-    const u = username.trim().toLowerCase();
-    const match = logins.find((l) => l.username === u);
-    const ok = match && (await checkPassword(password, match.passwordHash));
-    setSubmitting(false);
-    if (ok) {
-      setAuthenticated(match.role);
-      onSuccess();
-    } else {
-      setError("Wrong username or password");
+    try {
+      const u = username.trim().toLowerCase();
+      const match = logins.find((l) => l.username === u);
+      const ok = match && (await checkPassword(password, match.passwordHash));
+      if (ok) {
+        setAuthenticated(match.role);
+        onSuccess();
+      } else {
+        setError("Wrong username or password");
+        setPassword("");
+      }
+    } catch (err) {
+      setError(err?.message || "Login failed. Try again.");
       setPassword("");
+    } finally {
+      setSubmitting(false);
     }
   };
 
