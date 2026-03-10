@@ -7,10 +7,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Playfair Display"', 'Georgia', 'serif'],
         sans: ['"Source Sans 3"', 'system-ui', 'sans-serif'],
-        brand: ['"DM Sans"', 'system-ui', 'sans-serif'],
-        script: ['"Great Vibes"', 'cursive'],
       },
       colors: {
         cream: {

@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactCrop, { centerCrop, convertToPixelCrop } from "react-image-crop";
+import "react-image-crop/dist/ReactCrop.css";
 import {
   Plus,
   Camera,
@@ -15,6 +17,25 @@ import {
   Map as MapIcon,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
+
+function getCroppedImg(image, crop) {
+  if (!crop?.width || !crop?.height) return Promise.reject(new Error("No crop"));
+  const pixelCrop = crop.unit === "px" ? crop : convertToPixelCrop(crop, image.width, image.height);
+  const scaleX = image.naturalWidth / image.width;
+  const scaleY = image.naturalHeight / image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = pixelCrop.width * scaleX;
+  canvas.height = pixelCrop.height * scaleY;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(
+    image,
+    pixelCrop.x * scaleX, pixelCrop.y * scaleY, pixelCrop.width * scaleX, pixelCrop.height * scaleY,
+    0, 0, canvas.width, canvas.height
+  );
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Canvas toBlob failed"))), "image/jpeg", 0.9);
+  });
+}
 
 const AUTH_SESSION_KEY = "propstagram_authed";
 const PASSWORD_HASH_ENV = "VITE_PASSWORD_HASH";
@@ -285,7 +306,7 @@ function CardHeader({ children, className = "" }) {
 
 function CardTitle({ children, className = "" }) {
   return (
-    <h3 className={cn("font-display text-lg font-semibold text-ink-900", className)}>
+    <h3 className={cn("font-sans text-lg font-semibold text-ink-900", className)}>
       {children}
     </h3>
   );
@@ -368,7 +389,7 @@ function Modal({ open, onClose, children, title = "Add prop/surface" }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-200 bg-cream-50/95 backdrop-blur px-6 py-4 rounded-t-3xl">
-          <h2 className="font-display text-lg font-semibold text-ink-900" id="add-prop-title">
+          <h2 className="font-sans text-lg font-semibold text-ink-900" id="add-prop-title">
             {title}
           </h2>
           <Button
@@ -413,7 +434,7 @@ function ItemCard({ item, onClick }) {
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <h3 className="font-display text-xl font-semibold text-ink-900 truncate">
+            <h3 className="font-sans text-xl font-semibold text-ink-900 truncate">
               {item.title}
             </h3>
             <p className="mt-2 text-sm leading-6 text-ink-600 line-clamp-2">
@@ -430,18 +451,19 @@ function ItemCard({ item, onClick }) {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-ink-600">
+          {item.code ? (
+            <span className="font-mono font-semibold text-ink-800">{item.code}</span>
+          ) : null}
           <div className="flex items-center gap-2">
             <MapPin className="h-4 w-4 text-ink-500 flex-shrink-0" />
             <span className="truncate">{item.location}</span>
           </div>
-
           {item.job ? (
             <div className="flex items-center gap-2">
               <Briefcase className="h-4 w-4 text-ink-500 flex-shrink-0" />
               <span>{item.job}</span>
             </div>
           ) : null}
-
           <div className="flex items-center gap-2">
             <Package2 className="h-4 w-4 text-ink-500 flex-shrink-0" />
             <span>Qty: {item.quantity || 1}</span>
@@ -489,7 +511,7 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-200 bg-cream-50 px-6 py-4 rounded-t-3xl">
-          <h2 className="font-display text-lg font-semibold text-ink-900 truncate pr-4">
+          <h2 className="font-sans text-lg font-semibold text-ink-900 truncate pr-4">
             {item.title}
           </h2>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -577,6 +599,11 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
               {item.job ? <Badge className="bg-cream-200/80">{item.job}</Badge> : null}
             </div>
             <div className="flex flex-wrap gap-4 font-sans text-sm text-ink-600">
+              {item.code ? (
+                <div className="flex items-center gap-2 font-mono font-semibold text-ink-800">
+                  <span>Code: {item.code}</span>
+                </div>
+              ) : null}
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-ink-500 flex-shrink-0" />
                 <span>{item.location}</span>
@@ -608,6 +635,56 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
               </div>
             ) : null}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PhotoCropModal({ src, onComplete, onCancel }) {
+  const imgRef = useRef(null);
+  const [crop, setCrop] = useState(undefined);
+  const [applying, setApplying] = useState(false);
+
+  useEffect(() => {
+    const handleEscape = (e) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onCancel]);
+
+  const onImageLoad = (e) => {
+    const { width, height } = e.currentTarget;
+    setCrop(centerCrop({ unit: "%", width: 80, height: 80 }, width, height));
+  };
+
+  const handleApply = async () => {
+    if (!imgRef.current || !crop?.width || !crop?.height) return;
+    setApplying(true);
+    try {
+      const blob = await getCroppedImg(imgRef.current, crop);
+      onComplete(blob);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  if (!src) return null;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-ink-900/80 p-4" onClick={onCancel}>
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl border border-ink-200 bg-cream-50 shadow-soft-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-ink-200 px-4 py-3 font-sans font-medium text-ink-900">Crop photo</div>
+        <div className="overflow-auto p-4">
+          <ReactCrop crop={crop} onChange={(c) => setCrop(c)} aspect={4 / 3} className="max-h-[60vh]">
+            <img ref={imgRef} src={src} alt="Crop" style={{ maxHeight: "60vh", width: "auto" }} onLoad={onImageLoad} />
+          </ReactCrop>
+        </div>
+        <div className="flex gap-3 border-t border-ink-200 p-4">
+          <Button type="button" variant="outline" className="rounded-2xl flex-1" onClick={onCancel} disabled={applying}>
+            Cancel
+          </Button>
+          <Button type="button" variant="primary" className="rounded-2xl flex-1" onClick={handleApply} disabled={applying || !crop}>
+            {applying ? "Applying…" : "Use crop"}
+          </Button>
         </div>
       </div>
     </div>
@@ -658,6 +735,7 @@ function PropRoomInventoryApp() {
   const [lightboxImage, setLightboxImage] = useState(null);
   const [sortBy, setSortBy] = useState("date");
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
+  const [photoToCrop, setPhotoToCrop] = useState(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -673,6 +751,7 @@ function PropRoomInventoryApp() {
     shelf_index: null,
     length: "",
     width: "",
+    code: "",
   });
 
   const cameraInputRef = useRef(null);
@@ -694,7 +773,7 @@ function PropRoomInventoryApp() {
     setSaveError(null);
     const { data, error } = await supabase
       .from("props")
-      .select("id, title, description, location, category, job, quantity, photo, latitude, longitude, map_x, map_y, shelf_index, length, width, created_at")
+      .select("id, title, description, location, category, job, quantity, photo, latitude, longitude, map_x, map_y, shelf_index, length, width, code, created_at")
       .order("created_at", { ascending: false });
     if (error) {
       setSaveError("Could not load props. Check your Supabase setup.");
@@ -821,7 +900,7 @@ function PropRoomInventoryApp() {
 
       const matchesQuery =
         !q ||
-        [item.title, item.description, item.location, item.category, item.job]
+        [item.title, item.description, item.location, item.category, item.job, item.code]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
@@ -851,19 +930,28 @@ function PropRoomInventoryApp() {
   const handlePhotoFile = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
-    formPhotoFileRef.current = file;
-    const objectUrl = URL.createObjectURL(file);
-
-    setForm((current) => {
-      if (current.photo && current.photo !== objectUrl) {
-        revokePhotoUrl(current.photo);
-      }
-      return { ...current, photo: objectUrl };
-    });
-
+    setPhotoToCrop(URL.createObjectURL(file));
     event.target.value = "";
   };
+
+  const handleCropComplete = useCallback(
+    (blob) => {
+      if (photoToCrop) URL.revokeObjectURL(photoToCrop);
+      setPhotoToCrop(null);
+      const url = URL.createObjectURL(blob);
+      formPhotoFileRef.current = new File([blob], "photo.jpg", { type: "image/jpeg" });
+      setForm((current) => {
+        if (current.photo && current.photo.startsWith("blob:")) revokePhotoUrl(current.photo);
+        return { ...current, photo: url };
+      });
+    },
+    [photoToCrop]
+  );
+
+  const handleCropCancel = useCallback(() => {
+    if (photoToCrop) URL.revokeObjectURL(photoToCrop);
+    setPhotoToCrop(null);
+  }, [photoToCrop]);
 
   const clearPhoto = () => {
     formPhotoFileRef.current = null;
@@ -893,8 +981,39 @@ function PropRoomInventoryApp() {
         shelf_index: null,
         length: "",
         width: "",
+        code: "",
       };
     });
+  };
+
+  const generateCode = () =>
+    String(Math.floor(10000 + Math.random() * 90000));
+
+  const openAddForm = () => {
+    setEditingId(null);
+    setSaveError(null);
+    formPhotoFileRef.current = null;
+    setForm((prev) => {
+      revokePhotoUrl(prev.photo);
+      return {
+        title: "",
+        description: "",
+        location: "",
+        category: "White Plateware",
+        job: "General Inventory",
+        quantity: 1,
+        photo: "",
+        latitude: null,
+        longitude: null,
+        map_x: null,
+        map_y: null,
+        shelf_index: null,
+        length: "",
+        width: "",
+        code: generateCode(),
+      };
+    });
+    setIsModalOpen(true);
   };
 
   const openEditForm = (item) => {
@@ -913,6 +1032,7 @@ function PropRoomInventoryApp() {
       shelf_index: item.shelf_index ?? null,
       length: item.length ?? "",
       width: item.width ?? "",
+      code: item.code ?? "",
     });
     setEditingId(item.id);
     setSaveError(null);
@@ -941,6 +1061,7 @@ function PropRoomInventoryApp() {
         form.shelf_index != null && Number.isInteger(form.shelf_index) && form.shelf_index >= 0 ? form.shelf_index : null,
       length: form.length?.trim() || null,
       width: form.width?.trim() || null,
+      code: form.code?.trim() || null,
     };
 
     if (supabase) {
@@ -999,6 +1120,7 @@ function PropRoomInventoryApp() {
         shelf_index: null,
         length: "",
         width: "",
+        code: "",
       });
       setEditingId(null);
       setIsModalOpen(false);
@@ -1046,6 +1168,7 @@ function PropRoomInventoryApp() {
       shelf_index: null,
       length: "",
       width: "",
+      code: "",
     });
     setEditingId(null);
     setIsModalOpen(false);
@@ -1106,16 +1229,12 @@ function PropRoomInventoryApp() {
               width={235}
               height={120}
             />
-            <span className="font-brand text-xl font-medium tracking-tight text-ink-900 md:text-2xl">
+            <span className="font-sans text-xl font-medium tracking-tight text-ink-900 md:text-2xl">
               Propstagram
             </span>
           </h1>
           <Button
-            onClick={() => {
-              setEditingId(null);
-              setSaveError(null);
-              setIsModalOpen(true);
-            }}
+            onClick={openAddForm}
             variant="primary"
             size="default"
             className="rounded-2xl shrink-0"
@@ -1133,6 +1252,11 @@ function PropRoomInventoryApp() {
           onOpenLightbox={setLightboxImage}
         />
 
+        <PhotoCropModal
+          src={photoToCrop}
+          onComplete={handleCropComplete}
+          onCancel={handleCropCancel}
+        />
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
 
         <Modal
@@ -1147,6 +1271,12 @@ function PropRoomInventoryApp() {
           <div className="flex flex-col max-h-[70vh]">
             <div className="flex-1 overflow-y-auto pr-1">
               <div className="grid gap-5">
+            {form.code ? (
+              <div className="rounded-2xl border border-ink-200 bg-cream-200/60 px-4 py-3">
+                <Label className="block mb-1 text-xs font-medium text-ink-600">Code (assign to this prop/surface)</Label>
+                <p className="font-mono text-xl font-semibold text-ink-900 tracking-wider">{form.code}</p>
+              </div>
+            ) : null}
             <div>
               <Label className="block mb-1.5">Title</Label>
               <Input
@@ -1540,7 +1670,7 @@ function PropRoomInventoryApp() {
               <div className="rounded-2xl border border-ink-200/80 bg-cream-200/60 p-4">
                 <Package2 className="h-10 w-10 text-ink-500" strokeWidth={1.25} />
               </div>
-              <h3 className="mt-4 font-display text-lg font-semibold text-ink-900">
+              <h3 className="mt-4 font-sans text-lg font-semibold text-ink-900">
                 No props here
               </h3>
               <p className="mt-2 font-sans text-sm text-ink-600">
@@ -1550,11 +1680,7 @@ function PropRoomInventoryApp() {
                 type="button"
                 variant="primary"
                 className="mt-6 rounded-2xl"
-                onClick={() => {
-                  setEditingId(null);
-                  setSaveError(null);
-                  setIsModalOpen(true);
-                }}
+                onClick={openAddForm}
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Add prop/surface

@@ -38,6 +38,7 @@ create table if not exists public.props (
   shelf_index int,
   length text,
   width text,
+  code text,
   created_at timestamptz not null default now()
 );
 
@@ -72,7 +73,8 @@ alter table public.props
   add column if not exists map_y double precision,
   add column if not exists shelf_index int,
   add column if not exists length text,
-  add column if not exists width text;
+  add column if not exists width text,
+  add column if not exists code text;
 ```
 
 `shelf_index` is which shelf the prop is on (0–N on the floor plan). `length` and `width` are optional dimensions (e.g. "24 in", "18 cm"). Replace `public/prop-room-map.svg` with your own floor plan to use it.
