@@ -47,18 +47,24 @@ function parseLogins() {
   const loginsRaw = import.meta.env[LOGINS_ENV];
   if (typeof loginsRaw === "string" && loginsRaw.trim()) {
     const entries = [];
-    for (const part of loginsRaw.split(",")) {
-      const tri = part.trim().split(":");
-      if (tri.length >= 3) {
-        const [u, h, r] = tri;
-        const username = u?.trim() ?? "";
-        const hash = h?.trim() ?? "";
-        const role = (r?.trim() ?? "").toLowerCase();
-        if (username && hash && (role === "client" || role === "editor"))
-          entries.push({ username: username.toLowerCase(), passwordHash: hash.toLowerCase(), role });
-      }
+    const parts = loginsRaw.split(",").map((p) => p.trim()).filter(Boolean);
+    for (const part of parts) {
+      // Parse so the middle (hash) can be 64 hex chars; only first and last colon are delimiters.
+      const firstColon = part.indexOf(":");
+      const lastColon = part.lastIndexOf(":");
+      if (firstColon === -1 || lastColon === -1 || firstColon === lastColon) continue;
+      const username = part.slice(0, firstColon).trim().toLowerCase();
+      const hash = part.slice(firstColon + 1, lastColon).trim().toLowerCase();
+      const role = part.slice(lastColon + 1).trim().toLowerCase();
+      if (username && hash && (role === "client" || role === "editor"))
+        entries.push({ username, passwordHash: hash, role });
     }
-    if (entries.length) return entries;
+    if (entries.length) {
+      if (import.meta.env.DEV) {
+        console.log("[Login] Parsed logins:", entries.length, "→", entries.map((e) => e.username).join(", "));
+      }
+      return entries;
+    }
   }
   const singleHash = import.meta.env[PASSWORD_HASH_ENV];
   if (typeof singleHash === "string" && singleHash.trim())
@@ -123,7 +129,11 @@ function LoginPage({ onSuccess }) {
         setAuthenticated(match.role);
         onSuccess();
       } else {
-        setError("Wrong username or password");
+        setError(
+          import.meta.env.DEV
+            ? "Wrong username or password. (Check the browser console to see which logins were loaded.)"
+            : "Wrong username or password"
+        );
         setPassword("");
       }
     } catch (err) {
