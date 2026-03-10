@@ -551,8 +551,8 @@ export default function PropRoomInventoryApp() {
               src="/macguffin-logo.png"
               alt="MacGuffin"
               className="h-9 w-auto object-contain object-left md:h-10"
-              width={192}
-              height={98}
+              width={188}
+              height={96}
             />
             <span className="font-brand text-xl font-medium tracking-tight text-ink-900 md:text-2xl">
               Propstagram
