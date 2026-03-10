@@ -46,6 +46,61 @@ create policy "Allow public insert"
   with check (true);
 ```
 
+### 2b. Create the `jobs` and `sections` tables (shared job and category lists)
+
+Run this in the SQL Editor so everyone sees the same jobs and sections:
+
+```sql
+-- Jobs: one row per job name
+create table if not exists public.jobs (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now()
+);
+
+alter table public.jobs enable row level security;
+
+create policy "Allow public read jobs"
+  on public.jobs for select using (true);
+
+create policy "Allow public insert jobs"
+  on public.jobs for insert with check (true);
+
+-- Sections (categories): one row per section, sort_order keeps display order
+create table if not exists public.sections (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  sort_order int not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table public.sections enable row level security;
+
+create policy "Allow public read sections"
+  on public.sections for select using (true);
+
+create policy "Allow public insert sections"
+  on public.sections for insert with check (true);
+
+-- Seed initial job
+insert into public.jobs (name) values ('General Inventory')
+on conflict (name) do nothing;
+
+-- Seed initial sections (order matches the app tabs)
+insert into public.sections (name, sort_order) values
+  ('White Plateware', 1),
+  ('Earthtone Plateware', 2),
+  ('Colored Plateware', 3),
+  ('Earthtone Smalls', 4),
+  ('White Smalls', 5),
+  ('Metal Smalls', 6),
+  ('Copper', 7),
+  ('Pots/Pans', 8),
+  ('Utensils', 9),
+  ('Miscellaneous', 10)
+on conflict (name) do nothing;
+```
+
 ### 3. Create the storage bucket for photos
 
 1. Go to **Storage** in the left sidebar.

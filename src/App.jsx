@@ -6,8 +6,6 @@ import {
   Briefcase,
   Package2,
   Search,
-  Boxes,
-  Grid3X3,
   Upload,
   X,
   Loader2,
@@ -16,40 +14,21 @@ import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
 const starterItems = [];
 
-const sectionCards = [
-  {
-    title: "All Props",
-    description: "Browse the full prop room inventory across every category and job.",
-    countLabel: "Everything",
-  },
-  {
-    title: "Plates",
-    description: "Dining plates, serving plates, chargers, and tabletop pieces.",
-    countLabel: "Kitchen",
-  },
-  {
-    title: "Cuttingboards",
-    description: "Wood, plastic, and styled boards for prep tables, food shoots, and kitchens.",
-    countLabel: "Prep",
-  },
-  {
-    title: "Books",
-    description: "Decor books, journals, hardcovers, and shelf dressing pieces.",
-    countLabel: "Set Dressing",
-  },
-  {
-    title: "Lighting",
-    description: "Practical lamps and decorative fixtures for interior scenes.",
-    countLabel: "Practicals",
-  },
-  {
-    title: "Electronics",
-    description: "Phones, radios, clocks, and small electrical props.",
-    countLabel: "Tech",
-  },
+const sectionTitles = [
+  "All Props",
+  "White Plateware",
+  "Earthtone Plateware",
+  "Colored Plateware",
+  "Earthtone Smalls",
+  "White Smalls",
+  "Metal Smalls",
+  "Copper",
+  "Pots/Pans",
+  "Utensils",
+  "Miscellaneous",
 ];
 
-const starterJobs = ["General Inventory", "Foxhunting", "Whipped Up"];
+const starterJobs = ["General Inventory"];
 
 function cn(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -179,8 +158,8 @@ function Modal({ open, onClose, children }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-200 bg-cream-50/95 backdrop-blur px-6 py-4 rounded-t-3xl">
-          <h2 className="font-display text-xl font-semibold text-ink-900">
-            Add new prop
+          <h2 className="font-display text-lg font-semibold text-ink-900">
+            Add prop
           </h2>
           <Button
             variant="ghost"
@@ -260,14 +239,14 @@ export default function PropRoomInventoryApp() {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
   const [activeSection, setActiveSection] = useState("All Props");
-  const [sections, setSections] = useState(sectionCards);
+  const [sections, setSections] = useState(sectionTitles);
   const [jobs, setJobs] = useState(starterJobs);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState({
     title: "",
     description: "",
     location: "",
-    category: "Plates",
+    category: "White Plateware",
     job: "General Inventory",
     quantity: 1,
     photo: "",
@@ -281,7 +260,7 @@ export default function PropRoomInventoryApp() {
   const [saveError, setSaveError] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const availableSections = sections.filter((section) => section.title !== "All Props");
+  const availableSections = sections.filter((s) => s !== "All Props");
 
   const fetchProps = useCallback(async () => {
     if (!supabase) {
@@ -294,76 +273,118 @@ export default function PropRoomInventoryApp() {
       .from("props")
       .select("id, title, description, location, category, job, quantity, photo")
       .order("created_at", { ascending: false });
-    setLoading(false);
     if (error) {
       setSaveError("Could not load props. Check your Supabase setup.");
+      setLoading(false);
       return;
     }
     setItems(data || []);
+    setLoading(false);
+  }, []);
+
+  const fetchJobs = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase.from("jobs").select("name").order("created_at");
+    if (error) return;
+    setJobs(data?.length ? data.map((r) => r.name) : starterJobs);
+  }, []);
+
+  const fetchSections = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from("sections")
+      .select("name, sort_order")
+      .order("sort_order");
+    if (error) return;
+    const names = data?.length ? data.map((r) => r.name) : sectionTitles.filter((s) => s !== "All Props");
+    setSections(["All Props", ...names]);
   }, []);
 
   useEffect(() => {
-    fetchProps();
-  }, [fetchProps]);
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      await fetchProps();
+      if (cancelled) return;
+      await Promise.all([fetchJobs(), fetchSections()]);
+    })();
+    return () => { cancelled = true; };
+  }, [fetchProps, fetchJobs, fetchSections]);
 
   useEffect(() => {
     if (!supabase) return;
     const channel = supabase
-      .channel("props-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "props" },
-        () => {
-          fetchProps();
-        }
-      )
+      .channel("shared-data")
+      .on("postgres_changes", { event: "*", schema: "public", table: "props" }, fetchProps)
+      .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, fetchJobs)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sections" }, fetchSections)
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchProps]);
+  }, [fetchProps, fetchJobs, fetchSections]);
 
-  const addSection = () => {
+  const addSection = async () => {
     const nextSection = window.prompt("Add a new section name");
     if (!nextSection) return;
 
     const title = nextSection.trim();
     if (!title) return;
 
-    const existingSection = sections.find(
-      (section) => section.title.toLowerCase() === title.toLowerCase()
-    );
-
-    if (existingSection) {
-      setForm((current) => ({ ...current, category: existingSection.title }));
+    const existing = sections.find((s) => s.toLowerCase() === title.toLowerCase());
+    if (existing) {
+      setForm((current) => ({ ...current, category: existing }));
       return;
     }
 
-    const newSection = {
-      title,
-      description: "Custom section added by your team.",
-      countLabel: "Custom",
-    };
-
-    setSections((current) => [...current, newSection]);
+    if (supabase) {
+      const { data: maxRow } = await supabase
+        .from("sections")
+        .select("sort_order")
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const nextOrder = (maxRow?.sort_order ?? 0) + 1;
+      const { error } = await supabase.from("sections").insert({ name: title, sort_order: nextOrder });
+      if (error) {
+        if (error.code === "23505") {
+          setForm((current) => ({ ...current, category: title }));
+        }
+        return;
+      }
+      await fetchSections();
+    } else {
+      setSections((current) => [...current, title]);
+    }
     setForm((current) => ({ ...current, category: title }));
   };
 
-  const addJob = () => {
+  const addJob = async () => {
     const nextJob = window.prompt("Add a new job name");
     if (!nextJob) return;
 
     const title = nextJob.trim();
     if (!title) return;
 
-    const existingJob = jobs.find((job) => job.toLowerCase() === title.toLowerCase());
-
+    const existingJob = jobs.find((j) => j.toLowerCase() === title.toLowerCase());
     if (existingJob) {
       setForm((current) => ({ ...current, job: existingJob }));
       return;
     }
 
-    setJobs((current) => [...current, title]);
+    if (supabase) {
+      const { error } = await supabase.from("jobs").insert({ name: title });
+      if (error) {
+        if (error.code === "23505") setForm((current) => ({ ...current, job: title }));
+        return;
+      }
+      await fetchJobs();
+    } else {
+      setJobs((current) => [...current, title]);
+    }
     setForm((current) => ({ ...current, job: title }));
   };
 
@@ -426,7 +447,7 @@ export default function PropRoomInventoryApp() {
         title: "",
         description: "",
         location: "",
-        category: "Plates",
+        category: "White Plateware",
         job: "General Inventory",
         quantity: 1,
         photo: "",
@@ -480,7 +501,7 @@ export default function PropRoomInventoryApp() {
         title: "",
         description: "",
         location: "",
-        category: "Plates",
+        category: "White Plateware",
         job: "General Inventory",
         quantity: 1,
         photo: "",
@@ -508,7 +529,7 @@ export default function PropRoomInventoryApp() {
       title: "",
       description: "",
       location: "",
-      category: "Plates",
+      category: "White Plateware",
       job: "General Inventory",
       quantity: 1,
       photo: "",
@@ -522,25 +543,16 @@ export default function PropRoomInventoryApp() {
       {/* Subtle background texture */}
       <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(184,134,11,0.06),transparent)]" />
 
-      <div className="relative mx-auto max-w-7xl px-6 py-10 lg:px-8 lg:py-12">
+      <div className="relative mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:py-8">
         {/* Header */}
-        <div className="mb-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="font-sans text-xs font-medium uppercase tracking-[0.35em] text-ink-500">
-              MacGuffin Systems
-            </p>
-            <h1 className="mt-3 font-display text-4xl font-semibold tracking-tight text-ink-900 md:text-5xl lg:text-6xl">
-              MacGuffin Propstagram
-            </h1>
-            <p className="mt-4 max-w-2xl font-sans text-base leading-relaxed text-ink-600">
-              Built for fast logging and easy retrieval: title, description, phone
-              camera photo, and exact location in the room.
-            </p>
-          </div>
-
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-ink-900 md:text-3xl">
+            MacGuffin Films · Propstagram
+          </h1>
           <Button
             onClick={() => setIsModalOpen(true)}
             variant="primary"
+            size="default"
             className="rounded-2xl shrink-0"
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -585,9 +597,9 @@ export default function PropRoomInventoryApp() {
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
                 className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
               >
-                {availableSections.map((section) => (
-                  <option key={section.title} value={section.title}>
-                    {section.title}
+                {availableSections.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
                   </option>
                 ))}
               </select>
@@ -766,177 +778,54 @@ export default function PropRoomInventoryApp() {
           </Card>
         ) : null}
 
-        {/* Stats row */}
+        {/* Search + tabs + count */}
         {!loading && (
         <>
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card className="border-ink-200/60">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="font-sans text-sm font-medium text-ink-600">
-                  Total Props
-                </p>
-                <p className="mt-2 font-display text-3xl font-semibold text-ink-900">
-                  {items.reduce((sum, item) => sum + (item.quantity || 1), 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-ink-200/80 bg-cream-200/60 p-3.5">
-                <Package2 className="h-6 w-6 text-accent-dark" strokeWidth={1.5} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-ink-200/60">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="font-sans text-sm font-medium text-ink-600">
-                  Searchable Fields
-                </p>
-                <p className="mt-2 font-display text-3xl font-semibold text-ink-900">
-                  5
-                </p>
-                <p className="mt-1.5 font-sans text-xs text-ink-500">
-                  Title, description, location, section, and job
-                </p>
-              </div>
-              <div className="rounded-2xl border border-ink-200/80 bg-cream-200/60 p-3.5">
-                <Search className="h-6 w-6 text-accent-dark" strokeWidth={1.5} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-ink-200/60">
-            <CardContent className="flex items-center justify-between p-6">
-              <div>
-                <p className="font-sans text-sm font-medium text-ink-600">
-                  Storage Focus
-                </p>
-                <p className="mt-2 font-display text-3xl font-semibold text-ink-900">
-                  Fast
-                </p>
-                <p className="mt-1.5 font-sans text-xs text-ink-500">
-                  Designed for practical prop-room retrieval and counts
-                </p>
-              </div>
-              <div className="rounded-2xl border border-ink-200/80 bg-cream-200/60 p-3.5">
-                <Boxes className="h-6 w-6 text-accent-dark" strokeWidth={1.5} />
-              </div>
-            </CardContent>
-          </Card>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative flex-1 max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-500" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search props…"
+              className="pl-9 h-10 rounded-xl"
+            />
+          </div>
+          <span className="font-sans text-sm text-ink-600">
+            {items.reduce((sum, item) => sum + (item.quantity || 1), 0)} props
+          </span>
         </div>
 
-        {/* Search */}
-        <Card className="mt-6 border-ink-200/60">
-          <CardContent className="p-4">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-500" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by prop name, description, or location..."
-                className="pl-11 h-12 rounded-2xl"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Section cards */}
-        <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {sections.map((section) => {
-            const sectionCount =
-              section.title === "All Props"
+        {/* Section tabs */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {sections.map((name) => {
+            const count =
+              name === "All Props"
                 ? items.length
-                : items.filter((item) => item.category === section.title).length;
-
-            const isActive = activeSection === section.title;
-
+                : items.filter((item) => item.category === name).length;
+            const isActive = activeSection === name;
             return (
               <button
-                key={section.title}
+                key={name}
                 type="button"
-                onClick={() => setActiveSection(section.title)}
+                onClick={() => setActiveSection(name)}
                 className={cn(
-                  "rounded-3xl border p-6 text-left transition-all duration-300",
+                  "rounded-xl px-4 py-2 font-sans text-sm font-medium transition-colors",
                   isActive
-                    ? "border-accent/40 bg-ink-900 text-cream-50 shadow-soft-lg ring-2 ring-accent/30"
-                    : "border-ink-200/80 bg-cream-50 hover:border-ink-300 hover:bg-cream-100 hover:shadow-soft"
+                    ? "bg-ink-900 text-cream-50"
+                    : "bg-cream-200/80 text-ink-700 hover:bg-cream-300"
                 )}
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className={cn(
-                        "font-sans text-xs font-medium uppercase tracking-[0.28em]",
-                        isActive ? "text-cream-200" : "text-ink-500"
-                      )}
-                    >
-                      {section.countLabel}
-                    </p>
-                    <h3
-                      className={cn(
-                        "mt-3 font-display text-2xl font-semibold",
-                        isActive ? "text-cream-50" : "text-ink-900"
-                      )}
-                    >
-                      {section.title}
-                    </h3>
-                    <p
-                      className={cn(
-                        "mt-3 font-sans text-sm leading-6",
-                        isActive ? "text-cream-200" : "text-ink-600"
-                      )}
-                    >
-                      {section.description}
-                    </p>
-                  </div>
-
-                  <div
-                    className={cn(
-                      "flex-shrink-0 rounded-2xl border p-3",
-                      isActive
-                        ? "border-cream-50/20 bg-cream-50/10"
-                        : "border-ink-200/80 bg-cream-200/60"
-                    )}
-                  >
-                    <Grid3X3
-                      className={cn(
-                        "h-5 w-5",
-                        isActive ? "text-cream-200" : "text-ink-600"
-                      )}
-                      strokeWidth={1.5}
-                    />
-                  </div>
-                </div>
-
-                <div
-                  className={cn(
-                    "mt-5 flex items-center justify-between font-sans text-sm",
-                    isActive ? "text-cream-200" : "text-ink-600"
-                  )}
-                >
-                  <span>{sectionCount} items</span>
-                  <span className="font-medium">Open section →</span>
-                </div>
+                {name} <span className="opacity-70">({count})</span>
               </button>
             );
           })}
         </div>
 
-        {/* Results header */}
-        <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="font-sans text-sm font-medium text-ink-600">
-              Showing section
-            </p>
-            <h2 className="mt-1 font-display text-2xl font-semibold text-ink-900">
-              {activeSection}
-            </h2>
-          </div>
-
-          <Badge className="bg-cream-50 border-ink-200 px-4 py-2 font-sans text-sm font-medium shadow-soft">
-            {filteredItems.length} matching props
-          </Badge>
-        </div>
+        {/* Results line */}
+        <p className="mt-4 font-sans text-sm text-ink-600">
+          {filteredItems.length} {filteredItems.length === 1 ? "prop" : "props"}
+        </p>
 
         {/* Item grid or empty state */}
         {filteredItems.length > 0 ? (
@@ -951,37 +840,15 @@ export default function PropRoomInventoryApp() {
               <div className="rounded-2xl border border-ink-200/80 bg-cream-200/60 p-4">
                 <Package2 className="h-10 w-10 text-ink-500" strokeWidth={1.25} />
               </div>
-              <h3 className="mt-6 font-display text-xl font-semibold text-ink-900">
-                No props found
+              <h3 className="mt-4 font-display text-lg font-semibold text-ink-900">
+                No props here
               </h3>
-              <p className="mt-3 max-w-md font-sans text-sm leading-relaxed text-ink-600">
-                Try another search, switch sections, or add your first prop to the
-                room.
+              <p className="mt-2 font-sans text-sm text-ink-600">
+                Try another search, switch tabs, or add a prop.
               </p>
             </CardContent>
           </Card>
         )}
-
-        {/* Next upgrades */}
-        <Card className="mt-8 border-dashed border-ink-200 bg-cream-50/60">
-          <CardHeader>
-            <CardTitle className="text-ink-900">Good next upgrades</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 font-sans text-sm text-ink-600 md:grid-cols-2">
-            <div className="rounded-2xl border border-ink-200/80 bg-cream-100/80 p-4">
-              Direct phone camera capture built into add-prop flow
-            </div>
-            <div className="rounded-2xl border border-ink-200/80 bg-cream-100/80 p-4">
-              QR code labels for shelves and bins
-            </div>
-            <div className="rounded-2xl border border-ink-200/80 bg-cream-100/80 p-4">
-              Room map with clickable storage zones
-            </div>
-            <div className="rounded-2xl border border-ink-200/80 bg-cream-100/80 p-4">
-              Job-based filtering for project-specific prop pulls
-            </div>
-          </CardContent>
-        </Card>
         </>
         )}
       </div>
