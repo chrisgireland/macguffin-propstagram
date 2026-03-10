@@ -1039,7 +1039,11 @@ function PropRoomInventoryApp() {
   };
 
   const addItem = async () => {
-    if (!form.title.trim() || !form.location.trim()) return;
+    if (!form.title.trim() || !form.location.trim()) {
+      setSaveError("Title and location are required.");
+      return;
+    }
+    setSaveError(null);
 
     const payload = {
       title: form.title.trim(),
@@ -1065,7 +1069,7 @@ function PropRoomInventoryApp() {
 
     if (supabase) {
       setSaving(true);
-      setSaveError(null);
+      console.log("[Save] Using Supabase, payload keys:", Object.keys(payload));
       try {
         let photoUrl = "";
 
@@ -1077,6 +1081,7 @@ function PropRoomInventoryApp() {
             .from("prop-photos")
             .upload(path, file, { cacheControl: "3600", upsert: false });
           if (uploadError) {
+            console.error("[Save] Photo upload error:", uploadError);
             setSaveError("Photo upload failed. You can save without a photo and try again.");
             return;
           }
@@ -1088,18 +1093,21 @@ function PropRoomInventoryApp() {
         payload.photo = photoUrl || null;
 
         if (editingId) {
-          const { error } = await supabase.from("props").update(payload).eq("id", editingId);
+          const { data: updateData, error } = await supabase.from("props").update(payload).eq("id", editingId).select();
           if (error) {
+            console.error("[Save] Update error:", error);
             setSaveError(error.message || "Failed to update prop.");
             return;
           }
         } else {
-          const { error } = await supabase.from("props").insert(payload);
+          const { data: insertData, error } = await supabase.from("props").insert(payload).select();
           if (error) {
+            console.error("[Save] Insert error:", error);
             setSaveError(error.message || "Failed to save prop.");
             return;
           }
         }
+        console.log("[Save] Success.");
         formPhotoFileRef.current = null;
         setForm({
           title: "",
@@ -1123,6 +1131,7 @@ function PropRoomInventoryApp() {
         await fetchProps();
         setSelectedItem(null);
       } catch (err) {
+        console.error("[Save] Exception:", err);
         setSaveError(err?.message || String(err) || "Something went wrong. Try again.");
       } finally {
         setSaving(false);
@@ -1506,7 +1515,13 @@ function PropRoomInventoryApp() {
               </div>
             </div>
 
-            <div className="sticky bottom-0 mt-4 pt-4 border-t border-ink-200 bg-cream-50 flex gap-3">
+            <div className="sticky bottom-0 mt-4 pt-4 border-t border-ink-200 bg-cream-50 space-y-3">
+              {saveError && (
+                <p className="rounded-2xl bg-red-50 border border-red-200 px-4 py-2 font-sans text-sm text-red-800">
+                  {saveError}
+                </p>
+              )}
+              <div className="flex gap-3">
               <Button
                 type="button"
                 variant="outline"
@@ -1532,6 +1547,7 @@ function PropRoomInventoryApp() {
                   editingId ? "Update Prop/Surface" : "Save Prop/Surface"
                 )}
               </Button>
+              </div>
             </div>
           </div>
         </Modal>
