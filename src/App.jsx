@@ -13,7 +13,6 @@ import {
   Loader2,
   Trash2,
   Pencil,
-  Download,
   Map as MapIcon,
   ListPlus,
   Link2,
@@ -43,6 +42,22 @@ function getCroppedImg(image, crop) {
 const AUTH_SESSION_KEY = "propstagram_authed";
 const AUTH_ROLE_KEY = "propstagram_role";
 const SHARE_LIST_IDS_KEY = "propstagram_share_list_ids";
+const DEVICE_ID_KEY = "propstagram_device_id";
+
+function getDeviceId() {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+function getListIdsKey() {
+  return `${SHARE_LIST_IDS_KEY}_${getDeviceId()}`;
+}
+
 const PASSWORD_HASH_ENV = "VITE_PASSWORD_HASH";
 const LOGINS_ENV = "VITE_LOGINS";
 
@@ -1011,7 +1026,7 @@ function AddToListModal({ open, item, onClose }) {
     setShareUrl("");
     setNewListName("");
     setMessage("");
-    const ids = JSON.parse(localStorage.getItem(SHARE_LIST_IDS_KEY) || "[]");
+    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
     if (!ids.length) {
       setMyLists([]);
       return;
@@ -1048,9 +1063,9 @@ function AddToListModal({ open, item, onClose }) {
     if (itemErr) {
       setMessage("List created but could not add prop. Try adding it from the list.");
     }
-    const ids = JSON.parse(localStorage.getItem(SHARE_LIST_IDS_KEY) || "[]");
+    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
     if (!ids.includes(listId)) {
-      localStorage.setItem(SHARE_LIST_IDS_KEY, JSON.stringify([...ids, listId]));
+      localStorage.setItem(getListIdsKey(), JSON.stringify([...ids, listId]));
     }
     setCreatedListId(listId);
     setShareUrl(`${window.location.origin}${window.location.pathname}#/share/${listId}`);
@@ -1163,7 +1178,7 @@ function MyListsModal({ open, onClose }) {
   useEffect(() => {
     if (!open || !supabase) return;
     setLists([]);
-    const ids = JSON.parse(localStorage.getItem(SHARE_LIST_IDS_KEY) || "[]");
+    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
     if (!ids.length) {
       setLoading(false);
       return;
@@ -1770,34 +1785,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
     setSelectedItem(null);
   };
 
-  const exportCSV = () => {
-    const headers = ["Title", "Description", "Location", "Category", "Job", "Quantity"];
-    const escape = (v) => {
-      const s = String(v ?? "");
-      return s.includes(",") || s.includes('"') || s.includes("\n")
-        ? `"${s.replace(/"/g, '""')}"`
-        : s;
-    };
-    const rows = filteredItems.map((item) =>
-      [
-        item.title,
-        item.description ?? "",
-        item.location,
-        item.category ?? "",
-        item.job ?? "",
-        item.quantity ?? 1,
-      ].map(escape).join(",")
-    );
-    const csv = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `props-${activeSection.replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   return (
     <div className="min-h-screen bg-cream-100 text-ink-900">
       {/* Subtle background texture */}
@@ -2252,18 +2239,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
             <option value="title">Title</option>
             {isEditor && <option value="location">Location</option>}
           </select>
-          {filteredItems.length > 0 && (
-            <Button
-              type="button"
-              variant="outline"
-              size="default"
-              className="rounded-xl h-9"
-              onClick={exportCSV}
-            >
-              <Download className="mr-1.5 h-4 w-4" />
-              Export CSV
-            </Button>
-          )}
         </div>
 
         {/* Item grid or empty state */}
