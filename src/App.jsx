@@ -544,10 +544,22 @@ export default function PropRoomInventoryApp() {
       <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(184,134,11,0.06),transparent)]" />
 
       <div className="relative mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:py-8">
-        {/* Header */}
+        {/* Header: logo (MacGuffin) + Films + Propstagram. Put your logo at public/macguffin-logo.png */}
         <div className="mb-8 flex items-center justify-between gap-4">
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-ink-900 md:text-3xl">
-            MacGuffin Films · Propstagram
+          <h1 className="flex items-center gap-2 flex-wrap">
+            <img
+              src="/macguffin-logo.png"
+              alt="MacGuffin"
+              className="h-8 object-contain object-left md:h-9"
+              width={160}
+              height={32}
+            />
+            <span className="font-display text-xl font-semibold text-ink-900 md:text-2xl">
+              Films
+            </span>
+            <span className="font-brand text-xl font-medium tracking-tight text-ink-900 md:text-2xl">
+              Propstagram
+            </span>
           </h1>
           <Button
             onClick={() => setIsModalOpen(true)}
