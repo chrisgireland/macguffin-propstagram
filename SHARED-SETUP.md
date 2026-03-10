@@ -188,33 +188,60 @@ create policy "Allow public read"
 
 ---
 
-## Password protection (optional)
+## Login (optional): client vs editor
 
-You can require a password to open the app. Only the **hash** of the password is stored (in env), not the password itself.
+**Where do I add logins?** You don't change any app code. You only edit:
 
-### How to set the password
+| Where the app runs | File or place to edit |
+|--------------------|------------------------|
+| **On your computer** (npm run dev) | The file **`.env.local`** in your project folder (e.g. `macguffin-propstagram/.env.local`). Create it if it doesn't exist. |
+| **On the web** (e.g. Vercel) | Your hosting dashboard → **Settings → Environment Variables**. Add the variable there, then redeploy. |
 
-1. **Choose a password** (e.g. `MySecret123`).
+You store a **hash** of each password (not the real password). You create the hash in a terminal, then paste it into `.env.local` or into the env variable on Vercel.
 
-2. **Generate its SHA-256 hash** (hex string). In a terminal:
-   ```bash
-   echo -n 'MySecret123' | shasum -a 256 | cut -d' ' -f1
-   ```
-   (Use your password instead of `MySecret123`. The `-n` is important so the hash doesn’t include a newline.)
+Two roles: **Editor** = full access (add/edit/delete). **Client** = read-only (browse only).
 
-3. **Put the hash in your env:**
-   - **Local:** In `.env.local` add a line:
-     ```
-     VITE_PASSWORD_HASH=the_hex_string_you_got
-     ```
-   - **Vercel:** In the project’s **Settings → Environment Variables**, add:
-     - Name: `VITE_PASSWORD_HASH`
-     - Value: the same hex string  
-     Then redeploy.
+### Add two logins (editor + client)
 
-4. Restart the dev server (or refresh the deployed app). The app will show a login page; after entering the correct password, the session lasts until the browser tab is closed or after 10 minutes of inactivity.
+**Step 1 — Get a hash for each password.** Open a terminal and run (use your own passwords in the quotes):
 
-If `VITE_PASSWORD_HASH` is not set, the app is not password-protected and anyone can open it.
+```bash
+echo -n 'MyEditorPassword' | shasum -a 256 | cut -d' ' -f1
+```
+
+Copy the long line it prints. Run it again for the client password:
+
+```bash
+echo -n 'MyClientPassword' | shasum -a 256 | cut -d' ' -f1
+```
+
+Copy that hash too.
+
+**Step 2 — Put them in your config.** In **`.env.local`** (local) or in **Vercel → Settings → Environment Variables** (deployed), add one line:
+
+```
+VITE_LOGINS=editor:PASTE_FIRST_HASH_HERE:editor,client:PASTE_SECOND_HASH_HERE:client
+```
+
+Replace `PASTE_FIRST_HASH_HERE` with the editor hash and `PASTE_SECOND_HASH_HERE` with the client hash. No spaces around the commas.
+
+**Step 3 — Restart** the dev server (or redeploy on Vercel). Log in with username `editor` or `client` and the password you used for that hash.
+
+You can use other usernames: e.g. `admin:hash:editor,viewer:hash:client`. Format is always `username:hash:role` with role `editor` or `client`.
+
+### One password only (no client)
+
+If you only need one login (everyone is an editor):
+
+1. Terminal: `echo -n 'YourPassword' | shasum -a 256 | cut -d' ' -f1` — copy the hash.
+2. In **`.env.local`** or Vercel env, add: `VITE_PASSWORD_HASH=paste_the_hash_here`
+3. On the login page, use username **`editor`** and that password.
+
+### Session
+
+After a successful login, the session lasts until the tab is closed or **10 minutes** of inactivity. There is no “Log out” button; close the tab or wait for timeout to end the session.
+
+If you don't set `VITE_LOGINS` or `VITE_PASSWORD_HASH`, the app has no login and everyone has full access.
 
 ---
 

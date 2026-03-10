@@ -38,23 +38,52 @@ function getCroppedImg(image, crop) {
 }
 
 const AUTH_SESSION_KEY = "propstagram_authed";
+const AUTH_ROLE_KEY = "propstagram_role";
 const PASSWORD_HASH_ENV = "VITE_PASSWORD_HASH";
+const LOGINS_ENV = "VITE_LOGINS";
+
+/** Parse VITE_LOGINS (username:passwordHash:role,...) or fallback to single VITE_PASSWORD_HASH as editor. */
+function parseLogins() {
+  const loginsRaw = import.meta.env[LOGINS_ENV];
+  if (typeof loginsRaw === "string" && loginsRaw.trim()) {
+    const entries = [];
+    for (const part of loginsRaw.split(",")) {
+      const tri = part.trim().split(":");
+      if (tri.length >= 3) {
+        const [username, hash, role] = tri;
+        if (username && hash && (role === "client" || role === "editor"))
+          entries.push({ username: username.trim().toLowerCase(), passwordHash: hash.trim().toLowerCase(), role });
+      }
+    }
+    if (entries.length) return entries;
+  }
+  const singleHash = import.meta.env[PASSWORD_HASH_ENV];
+  if (typeof singleHash === "string" && singleHash.trim())
+    return [{ username: "editor", passwordHash: singleHash.trim().toLowerCase(), role: "editor" }];
+  return [];
+}
 
 function isPasswordProtectionEnabled() {
-  const hash = import.meta.env[PASSWORD_HASH_ENV];
-  return typeof hash === "string" && hash.trim().length > 0;
+  return parseLogins().length > 0;
 }
 
 function isAuthenticated() {
   return sessionStorage.getItem(AUTH_SESSION_KEY) === "1";
 }
 
-function setAuthenticated() {
+function getAuthenticatedRole() {
+  const role = sessionStorage.getItem(AUTH_ROLE_KEY);
+  return role === "client" || role === "editor" ? role : "editor";
+}
+
+function setAuthenticated(role) {
   sessionStorage.setItem(AUTH_SESSION_KEY, "1");
+  sessionStorage.setItem(AUTH_ROLE_KEY, role === "client" ? "client" : "editor");
 }
 
 function clearAuthenticated() {
   sessionStorage.removeItem(AUTH_SESSION_KEY);
+  sessionStorage.removeItem(AUTH_ROLE_KEY);
 }
 
 async function hashPassword(password) {
@@ -72,22 +101,26 @@ async function checkPassword(enteredPassword, expectedHashHex) {
 }
 
 function LoginPage({ onSuccess }) {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const expectedHash = import.meta.env[PASSWORD_HASH_ENV];
+  const logins = useMemo(() => parseLogins(), []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
-    const ok = await checkPassword(password, expectedHash);
+    const u = username.trim().toLowerCase();
+    const match = logins.find((l) => l.username === u);
+    const ok = match && (await checkPassword(password, match.passwordHash));
     setSubmitting(false);
     if (ok) {
-      setAuthenticated();
+      setAuthenticated(match.role);
       onSuccess();
     } else {
-      setError("Wrong password");
+      setError("Wrong username or password");
       setPassword("");
     }
   };
@@ -105,25 +138,40 @@ function LoginPage({ onSuccess }) {
           />
           <p className="mt-3 font-sans text-ink-600">Propstagram</p>
         </div>
-        <form onSubmit={handleSubmit} className="rounded-3xl border border-ink-200 bg-cream-50 p-6 shadow-soft">
-          <label htmlFor="login-password" className="block text-sm font-medium text-ink-700 mb-2">
-            Password
-          </label>
-          <input
-            id="login-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
-            autoFocus
-            autoComplete="current-password"
-            className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 placeholder:text-ink-500 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
-          />
-          {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        <form onSubmit={handleSubmit} className="rounded-3xl border border-ink-200 bg-cream-50 p-6 shadow-soft space-y-4">
+          <div>
+            <label htmlFor="login-username" className="block text-sm font-medium text-ink-700 mb-2">
+              Username
+            </label>
+            <input
+              id="login-username"
+              type="text"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Enter username"
+              className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 placeholder:text-ink-500 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
+            />
+          </div>
+          <div>
+            <label htmlFor="login-password" className="block text-sm font-medium text-ink-700 mb-2">
+              Password
+            </label>
+            <input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              autoComplete="current-password"
+              className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 placeholder:text-ink-500 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             type="submit"
             disabled={submitting}
-            className="mt-4 w-full h-11 rounded-2xl bg-ink-900 text-cream-50 font-medium hover:bg-ink-800 focus:outline-none focus:ring-2 focus:ring-ink-700 disabled:opacity-50"
+            className="w-full h-11 rounded-2xl bg-ink-900 text-cream-50 font-medium hover:bg-ink-800 focus:outline-none focus:ring-2 focus:ring-ink-700 disabled:opacity-50"
           >
             {submitting ? "Checking…" : "Log in"}
           </button>
@@ -474,7 +522,7 @@ function ItemCard({ item, onClick }) {
   );
 }
 
-function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
+function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   useEffect(() => {
@@ -515,24 +563,28 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
             {item.title}
           </h2>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleEdit}
-              className="rounded-2xl text-ink-600 hover:text-ink-900"
-              aria-label="Edit prop"
-            >
-              <Pencil className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="rounded-2xl text-red-600 hover:bg-red-50 hover:text-red-700"
-              aria-label="Delete prop"
-            >
-              <Trash2 className="h-5 w-5" />
-            </Button>
+            {canEdit && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleEdit}
+                  className="rounded-2xl text-ink-600 hover:text-ink-900"
+                  aria-label="Edit prop"
+                >
+                  <Pencil className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="rounded-2xl text-red-600 hover:bg-red-50 hover:text-red-700"
+                  aria-label="Delete prop"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              </>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -722,7 +774,7 @@ function Lightbox({ imageUrl, onClose }) {
 }
 
 
-function PropRoomInventoryApp() {
+function PropRoomInventoryApp({ isEditor = true }) {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
   const [activeSection, setActiveSection] = useState("All Props");
@@ -1243,15 +1295,17 @@ function PropRoomInventoryApp() {
               Propstagram
             </span>
           </h1>
-          <Button
-            onClick={openAddForm}
-            variant="primary"
-            size="default"
-            className="rounded-2xl shrink-0"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Prop/Surface
-          </Button>
+          {isEditor && (
+            <Button
+              onClick={openAddForm}
+              variant="primary"
+              size="default"
+              className="rounded-2xl shrink-0"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Prop/Surface
+            </Button>
+          )}
         </div>
 
         <PropDetailModal
@@ -1260,6 +1314,7 @@ function PropRoomInventoryApp() {
           onDelete={deleteItem}
           onEdit={openEditForm}
           onOpenLightbox={setLightboxImage}
+          canEdit={isEditor}
         />
 
         <PhotoCropModal
@@ -1747,7 +1802,8 @@ function AppWithAuth() {
     return <LoginPage onSuccess={() => setAuthed(true)} />;
   }
 
-  return <PropRoomInventoryApp />;
+  const isEditor = !protected_ || getAuthenticatedRole() === "editor";
+  return <PropRoomInventoryApp isEditor={isEditor} />;
 }
 
 export default AppWithAuth;
