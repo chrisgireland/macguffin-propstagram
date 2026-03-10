@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(0,0,0,0.06)" stroke-width="0.5"/>
+    </pattern>
+    <linearGradient id="floor" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8e4dc"/>
+      <stop offset="100%" style="stop-color:#d4cfc4"/>
+    </linearGradient>
+    <linearGradient id="shelf" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#c4b8a8"/>
+      <stop offset="50%" style="stop-color:#ddd6cc"/>
+      <stop offset="100%" style="stop-color:#b8ac9c"/>
+    </linearGradient>
+  </defs>
+  <!-- Room outline -->
+  <rect width="800" height="500" fill="url(#floor)" stroke="#9a8f82" stroke-width="2"/>
+  <rect width="800" height="500" fill="url(#grid)"/>
+
+  <!-- Back wall shelves (left bank) -->
+  <rect x="40" y="60" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="40" y="100" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="40" y="140" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="40" y="180" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="40" y="220" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+
+  <!-- Back wall shelves (center) -->
+  <rect x="260" y="60" width="280" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="260" y="100" width="280" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="260" y="140" width="280" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="260" y="180" width="280" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="260" y="220" width="280" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+
+  <!-- Back wall shelves (right bank) -->
+  <rect x="580" y="60" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="580" y="100" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="580" y="140" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="580" y="180" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="580" y="220" width="180" height="12" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+
+  <!-- Right wall shelves -->
+  <rect x="620" y="280" width="12" height="160" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="660" y="280" width="12" height="160" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+  <rect x="700" y="280" width="12" height="160" fill="url(#shelf)" stroke="#8a7f72" stroke-width="1"/>
+
+  <!-- Island / table -->
+  <rect x="280" y="320" width="240" height="80" fill="#ddd6cc" stroke="#8a7f72" stroke-width="1" rx="4"/>
+
+  <!-- Label -->
+  <text x="400" y="485" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#6b5f52">Prop room  replace this with a photo of your shelving (same filename: prop-room-map.svg or .png)</text>
+</svg>

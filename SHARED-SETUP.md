@@ -31,6 +31,10 @@ create table if not exists public.props (
   job text not null,
   quantity int not null default 1,
   photo text,
+  latitude double precision,
+  longitude double precision,
+  map_x double precision,
+  map_y double precision,
   created_at timestamptz not null default now()
 );
 
@@ -54,6 +58,18 @@ create policy "Allow public update"
   using (true)
   with check (true);
 ```
+
+**If you already have a `props` table**, add map columns in the SQL Editor:
+
+```sql
+alter table public.props
+  add column if not exists latitude double precision,
+  add column if not exists longitude double precision,
+  add column if not exists map_x double precision,
+  add column if not exists map_y double precision;
+```
+
+`map_x` and `map_y` are for the **custom prop room map** (0–1 coordinates on your room image). Replace `public/prop-room-map.svg` with a photo or drawing of your shelving to use it.
 
 ### 2b. Create the `jobs` and `sections` tables (shared job and category lists)
 

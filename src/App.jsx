@@ -12,8 +12,65 @@ import {
   Trash2,
   Pencil,
   Download,
+  Map as MapIcon,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
+
+// Custom prop room map: one image + pins at (map_x, map_y) in 0–1 coordinates
+const ROOM_MAP_URL = "/prop-room-map.svg";
+
+function RoomMap({ items, onSelectItem, clickToSet, className = "" }) {
+  const containerRef = useRef(null);
+
+  const hasMapPos = (item) =>
+    item != null && typeof item.map_x === "number" && typeof item.map_y === "number";
+  const withPos = items.filter(hasMapPos);
+
+  const handleClick = (e) => {
+    if (!clickToSet || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    if (x >= 0 && x <= 1 && y >= 0 && y <= 1) clickToSet(x, y);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={cn("relative w-full overflow-hidden rounded-2xl border border-ink-200 bg-cream-100", className)}
+      style={{ aspectRatio: "8/5", ...(clickToSet ? { cursor: "crosshair" } : {}) }}
+      onClick={clickToSet ? handleClick : undefined}
+      role={clickToSet ? "button" : undefined}
+    >
+      <img
+        src={ROOM_MAP_URL}
+        alt="Prop room layout"
+        className="absolute inset-0 h-full w-full object-cover"
+        draggable={false}
+        style={{ pointerEvents: clickToSet ? "none" : "auto" }}
+      />
+      {withPos.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className="absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-ink-900 bg-accent shadow-md transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1"
+          style={{ left: `${item.map_x * 100}%`, top: `${item.map_y * 100}%` }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectItem?.(item);
+          }}
+          aria-label={item.title}
+          title={item.title}
+        />
+      ))}
+      {clickToSet && (
+        <p className="pointer-events-none absolute bottom-2 left-2 right-2 z-10 rounded-xl bg-ink-900/80 px-3 py-2 text-center text-sm text-cream-50 shadow-lg">
+          Click the map to set this prop’s location
+        </p>
+      )}
+    </div>
+  );
+}
 
 const starterItems = [];
 
@@ -261,7 +318,7 @@ function ItemCard({ item, onClick }) {
   );
 }
 
-function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
+function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, onViewOnMap }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   useEffect(() => {
@@ -401,6 +458,32 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox }) {
                 <span>Qty: {item.quantity || 1}</span>
               </div>
             </div>
+
+            {typeof item.map_x === "number" && typeof item.map_y === "number" ? (
+              <div className="mt-6">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="font-sans text-sm font-medium text-ink-700">Location on map</span>
+                  {onViewOnMap ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="default"
+                      className="rounded-xl"
+                      onClick={() => {
+                        onViewOnMap(item);
+                        onClose();
+                      }}
+                    >
+                      <MapIcon className="mr-1.5 h-4 w-4" />
+                      View on map
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="w-full rounded-2xl overflow-hidden border border-ink-200" style={{ aspectRatio: "8/5" }}>
+                  <RoomMap items={[item]} />
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -439,6 +522,7 @@ function Lightbox({ imageUrl, onClose }) {
   );
 }
 
+
 export default function PropRoomInventoryApp() {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
@@ -450,6 +534,9 @@ export default function PropRoomInventoryApp() {
   const [editingId, setEditingId] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
   const [sortBy, setSortBy] = useState("date");
+  const [viewMode, setViewMode] = useState("list");
+  const [mapPickerOpen, setMapPickerOpen] = useState(false);
+  const [mapFocusItemId, setMapFocusItemId] = useState(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -458,6 +545,10 @@ export default function PropRoomInventoryApp() {
     job: "General Inventory",
     quantity: 1,
     photo: "",
+    latitude: null,
+    longitude: null,
+    map_x: null,
+    map_y: null,
   });
 
   const cameraInputRef = useRef(null);
@@ -479,7 +570,7 @@ export default function PropRoomInventoryApp() {
     setSaveError(null);
     const { data, error } = await supabase
       .from("props")
-      .select("id, title, description, location, category, job, quantity, photo, created_at")
+      .select("id, title, description, location, category, job, quantity, photo, latitude, longitude, map_x, map_y, created_at")
       .order("created_at", { ascending: false });
     if (error) {
       setSaveError("Could not load props. Check your Supabase setup.");
@@ -671,6 +762,10 @@ export default function PropRoomInventoryApp() {
         job: "General Inventory",
         quantity: 1,
         photo: "",
+        latitude: null,
+        longitude: null,
+        map_x: null,
+        map_y: null,
       };
     });
   };
@@ -684,6 +779,10 @@ export default function PropRoomInventoryApp() {
       job: item.job || "General Inventory",
       quantity: item.quantity ?? 1,
       photo: item.photo || "",
+      latitude: item.latitude ?? null,
+      longitude: item.longitude ?? null,
+      map_x: item.map_x ?? null,
+      map_y: item.map_y ?? null,
     });
     setEditingId(item.id);
     setSaveError(null);
@@ -700,6 +799,14 @@ export default function PropRoomInventoryApp() {
       category: form.category,
       job: form.job.trim(),
       quantity: Math.max(1, Number(form.quantity || 1)),
+      latitude:
+        typeof form.latitude === "number" && !Number.isNaN(form.latitude) ? form.latitude : null,
+      longitude:
+        typeof form.longitude === "number" && !Number.isNaN(form.longitude) ? form.longitude : null,
+      map_x:
+        typeof form.map_x === "number" && !Number.isNaN(form.map_x) ? form.map_x : null,
+      map_y:
+        typeof form.map_y === "number" && !Number.isNaN(form.map_y) ? form.map_y : null,
     };
 
     if (supabase) {
@@ -751,6 +858,10 @@ export default function PropRoomInventoryApp() {
         job: "General Inventory",
         quantity: 1,
         photo: "",
+        latitude: null,
+        longitude: null,
+        map_x: null,
+        map_y: null,
       });
       setEditingId(null);
       setIsModalOpen(false);
@@ -791,6 +902,8 @@ export default function PropRoomInventoryApp() {
       job: "General Inventory",
       quantity: 1,
       photo: "",
+      latitude: null,
+      longitude: null,
     });
     setEditingId(null);
     setIsModalOpen(false);
@@ -876,6 +989,11 @@ export default function PropRoomInventoryApp() {
           onDelete={deleteItem}
           onEdit={openEditForm}
           onOpenLightbox={setLightboxImage}
+          onViewOnMap={(it) => {
+            setViewMode("map");
+            setMapFocusItemId(it?.id ?? null);
+            setSelectedItem(null);
+          }}
         />
 
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
@@ -918,6 +1036,50 @@ export default function PropRoomInventoryApp() {
                 onChange={(e) => setForm({ ...form, location: e.target.value })}
                 placeholder="Shelf B3 · Wall 2"
               />
+            </div>
+
+            <div>
+              <Label className="block mb-1.5">Map location (optional)</Label>
+              <p className="mb-2 text-sm text-ink-600">
+                Link this prop to a spot on the room map. Click the map to set the location.
+              </p>
+              {(form.map_x != null && form.map_y != null) ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-xl bg-cream-200 px-3 py-2 font-mono text-sm text-ink-700">
+                    {Number(form.map_x * 100).toFixed(0)}%, {Number(form.map_y * 100).toFixed(0)}%
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    className="rounded-xl"
+                    onClick={() => setForm({ ...form, map_x: null, map_y: null })}
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="default"
+                    className="rounded-xl"
+                    onClick={() => setMapPickerOpen(true)}
+                  >
+                    <MapIcon className="mr-1.5 h-4 w-4" />
+                    Change on map
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="default"
+                  className="rounded-xl"
+                  onClick={() => setMapPickerOpen(true)}
+                >
+                  <MapIcon className="mr-1.5 h-4 w-4" />
+                  Set location on map
+                </Button>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -1087,6 +1249,22 @@ export default function PropRoomInventoryApp() {
           </div>
         </Modal>
 
+        <Modal
+          open={mapPickerOpen}
+          onClose={() => setMapPickerOpen(false)}
+          title="Set location on room map"
+        >
+          <div className="w-full" style={{ aspectRatio: "8/5" }}>
+            <RoomMap
+              items={[]}
+              clickToSet={(map_x, map_y) => {
+                setForm((f) => ({ ...f, map_x, map_y }));
+                setMapPickerOpen(false);
+              }}
+            />
+          </div>
+        </Modal>
+
         {loading ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -1164,6 +1342,54 @@ export default function PropRoomInventoryApp() {
           })}
         </div>
 
+        {/* List / Map view toggle */}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => { setViewMode("list"); setMapFocusItemId(null); }}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 font-sans text-sm font-medium transition-colors",
+              viewMode === "list"
+                ? "bg-ink-900 text-cream-50"
+                : "bg-cream-200/80 text-ink-700 hover:bg-cream-300"
+            )}
+          >
+            <Package2 className="h-4 w-4" />
+            List
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("map")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 font-sans text-sm font-medium transition-colors",
+              viewMode === "map"
+                ? "bg-ink-900 text-cream-50"
+                : "bg-cream-200/80 text-ink-700 hover:bg-cream-300"
+            )}
+          >
+            <MapIcon className="h-4 w-4" />
+            Map
+          </button>
+        </div>
+
+        {viewMode === "map" ? (
+          <div className="mt-6">
+            <div className="w-full max-w-4xl mx-auto" style={{ aspectRatio: "8/5" }}>
+              <RoomMap
+                items={filteredItems}
+                onSelectItem={setSelectedItem}
+              />
+            </div>
+            {filteredItems.filter(
+              (i) => typeof i.map_x !== "number" || typeof i.map_y !== "number"
+            ).length > 0 && (
+              <p className="mt-3 text-sm text-ink-600">
+                Some props don’t have a map location. Edit a prop and use “Set location on map” to add one.
+              </p>
+            )}
+          </div>
+        ) : (
+        <>
         {/* Results line: count, sort, export */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <p className="font-sans text-sm text-ink-600">
@@ -1227,6 +1453,8 @@ export default function PropRoomInventoryApp() {
               </Button>
             </CardContent>
           </Card>
+        )}
+        </>
         )}
         </>
         )}
