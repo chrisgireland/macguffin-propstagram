@@ -17,6 +17,7 @@ import {
   Map as MapIcon,
   ListPlus,
   Link2,
+  List,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
@@ -1121,6 +1122,123 @@ function AddToListModal({ open, item, onClose }) {
   );
 }
 
+function MyListsModal({ open, onClose }) {
+  const [lists, setLists] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+
+  useEffect(() => {
+    if (!open || !supabase) return;
+    setLists([]);
+    const ids = JSON.parse(localStorage.getItem(SHARE_LIST_IDS_KEY) || "[]");
+    if (!ids.length) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    (async () => {
+      const { data: listsData } = await supabase
+        .from("shared_lists")
+        .select("id, name")
+        .in("id", ids);
+      if (!listsData?.length) {
+        setLoading(false);
+        return;
+      }
+      const { data: itemsData } = await supabase
+        .from("shared_list_items")
+        .select("list_id, prop_id")
+        .in("list_id", ids);
+      const propIds = [...new Set((itemsData || []).map((r) => r.prop_id))];
+      const { data: propsData } = propIds.length
+        ? await supabase.from("props").select("id, title").in("id", propIds)
+        : { data: [] };
+      const propsById = new Map((propsData || []).map((p) => [p.id, p.title || "Untitled"]));
+      const itemsByListId = new Map();
+      for (const r of itemsData || []) {
+        if (!itemsByListId.has(r.list_id)) itemsByListId.set(r.list_id, []);
+        itemsByListId.get(r.list_id).push(propsById.get(r.prop_id) || "Untitled");
+      }
+      setLists(
+        listsData.map((list) => ({
+          id: list.id,
+          name: list.name || "Untitled list",
+          propTitles: itemsByListId.get(list.id) || [],
+        }))
+      );
+      setLoading(false);
+    })();
+  }, [open]);
+
+  const copyLink = (listId) => {
+    const url = `${window.location.origin}${window.location.pathname}#/share/${listId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(listId);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
+
+  if (!open) return null;
+  return (
+    <Modal open={true} onClose={onClose} title="Your lists">
+      <div className="space-y-4">
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-ink-400" />
+          </div>
+        ) : lists.length === 0 ? (
+          <p className="font-sans text-ink-600 py-4">
+            You haven&apos;t created any lists yet. Use &quot;Add to list&quot; on a prop card or in the prop detail view to create one.
+          </p>
+        ) : (
+          <ul className="space-y-4">
+            {lists.map((list) => (
+              <li
+                key={list.id}
+                className="rounded-2xl border border-ink-200 bg-cream-50 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-sans font-semibold text-ink-900">
+                      {list.name}
+                    </h3>
+                    <p className="mt-1 text-sm text-ink-600">
+                      {list.propTitles.length} {list.propTitles.length === 1 ? "prop" : "props"}
+                    </p>
+                    {list.propTitles.length > 0 && (
+                      <ul className="mt-2 space-y-1 text-sm text-ink-700">
+                        {list.propTitles.map((title, i) => (
+                          <li key={i} className="truncate">• {title}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="default"
+                    className="rounded-xl shrink-0"
+                    onClick={() => copyLink(list.id)}
+                  >
+                    {copiedId === list.id ? (
+                      "Copied!"
+                    ) : (
+                      <>
+                        <Link2 className="mr-1.5 h-4 w-4" />
+                        Share
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function PropRoomInventoryApp({ isEditor = true }) {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
@@ -1135,6 +1253,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
   const [photoToCrop, setPhotoToCrop] = useState(null);
   const [addToListItem, setAddToListItem] = useState(null);
+  const [listsModalOpen, setListsModalOpen] = useState(false);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -1648,17 +1767,31 @@ function PropRoomInventoryApp({ isEditor = true }) {
               Propstagram
             </span>
           </h1>
-          {isEditor && (
-            <Button
-              onClick={openAddForm}
-              variant="primary"
-              size="default"
-              className="rounded-2xl shrink-0"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Prop/Surface
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {supabase && (
+              <Button
+                type="button"
+                onClick={() => setListsModalOpen(true)}
+                variant="outline"
+                size="default"
+                className="rounded-2xl shrink-0"
+              >
+                <List className="mr-2 h-4 w-4" />
+                Lists
+              </Button>
+            )}
+            {isEditor && (
+              <Button
+                onClick={openAddForm}
+                variant="primary"
+                size="default"
+                className="rounded-2xl shrink-0"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Prop/Surface
+              </Button>
+            )}
+          </div>
         </div>
 
         <PropDetailModal
@@ -1681,6 +1814,10 @@ function PropRoomInventoryApp({ isEditor = true }) {
           open={!!addToListItem}
           item={addToListItem}
           onClose={() => setAddToListItem(null)}
+        />
+        <MyListsModal
+          open={listsModalOpen}
+          onClose={() => setListsModalOpen(false)}
         />
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
 
