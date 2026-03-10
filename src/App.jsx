@@ -76,7 +76,7 @@ function LoginPage({ onSuccess }) {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <img
-            src="/macguffin-logo.png"
+            src="/macguffin.png"
             alt="MacGuffin"
             className="h-10 w-auto mx-auto object-contain"
             width={235}
@@ -1100,7 +1100,7 @@ function PropRoomInventoryApp() {
         <div className="mb-8 flex items-center justify-between gap-4 flex-wrap">
           <h1 className="flex items-center gap-3">
             <img
-              src="/macguffin-logo.png"
+              src="/macguffin.png"
               alt="MacGuffin"
               className="h-11 w-auto object-contain object-left md:h-14"
               width={235}
