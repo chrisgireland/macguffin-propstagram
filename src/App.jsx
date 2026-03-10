@@ -170,7 +170,7 @@ function LoginPage({ onSuccess }) {
           <img
             src="/macguffin.png"
             alt="MacGuffin"
-            className="h-10 w-auto mx-auto object-contain"
+            className="h-14 w-auto mx-auto object-contain"
             width={235}
             height={120}
           />
@@ -1941,7 +1941,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
             <img
               src="/macguffin.png"
               alt="MacGuffin"
-              className="h-11 w-auto object-contain object-left md:h-14"
+              className="h-14 w-auto object-contain object-left md:h-16"
               width={235}
               height={120}
             />
