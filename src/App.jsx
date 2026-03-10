@@ -9,6 +9,7 @@ import {
   Upload,
   X,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
 
@@ -176,9 +177,15 @@ function Modal({ open, onClose, children }) {
   );
 }
 
-function ItemCard({ item }) {
+function ItemCard({ item, onClick }) {
   return (
-    <Card className="overflow-hidden transition-all duration-300 hover:shadow-soft-lg hover:-translate-y-0.5 group">
+    <Card
+      role="button"
+      tabIndex={0}
+      onClick={() => onClick?.(item)}
+      onKeyDown={(e) => e.key === "Enter" && onClick?.(item)}
+      className="cursor-pointer overflow-hidden transition-all duration-300 hover:shadow-soft-lg hover:-translate-y-0.5 group"
+    >
       <div className="aspect-[4/3] bg-cream-200 overflow-hidden">
         {item.photo ? (
           <img
@@ -235,6 +242,94 @@ function ItemCard({ item }) {
   );
 }
 
+function PropDetailModal({ item, onClose, onDelete }) {
+  if (!item) return null;
+  const handleDelete = () => {
+    if (window.confirm("Delete this prop? This cannot be undone.")) {
+      onDelete(item);
+      onClose();
+    }
+  };
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-ink-200 bg-cream-50 shadow-soft-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-200 bg-cream-50 px-6 py-4 rounded-t-3xl">
+          <h2 className="font-display text-lg font-semibold text-ink-900 truncate pr-4">
+            {item.title}
+          </h2>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleDelete}
+              className="rounded-2xl text-red-600 hover:bg-red-50 hover:text-red-700"
+              title="Delete prop"
+            >
+              <Trash2 className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="rounded-2xl text-ink-600 hover:text-ink-900"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+        </div>
+        <div className="p-6">
+          <div className="aspect-[4/3] max-h-80 w-full rounded-2xl overflow-hidden bg-cream-200">
+            {item.photo ? (
+              <img
+                src={item.photo}
+                alt={item.title}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-ink-400">
+                <Camera className="h-16 w-16 opacity-60" strokeWidth={1.25} />
+              </div>
+            )}
+          </div>
+          <div className="mt-6 space-y-4">
+            {item.description ? (
+              <p className="font-sans text-ink-700 leading-relaxed">
+                {item.description}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Badge>{item.category || "Prop"}</Badge>
+              {item.job ? <Badge className="bg-cream-200/80">{item.job}</Badge> : null}
+            </div>
+            <div className="flex flex-wrap gap-4 font-sans text-sm text-ink-600">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-ink-500 flex-shrink-0" />
+                <span>{item.location}</span>
+              </div>
+              {item.job ? (
+                <div className="flex items-center gap-2">
+                  <Briefcase className="h-4 w-4 text-ink-500 flex-shrink-0" />
+                  <span>{item.job}</span>
+                </div>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <Package2 className="h-4 w-4 text-ink-500 flex-shrink-0" />
+                <span>Qty: {item.quantity || 1}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PropRoomInventoryApp() {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
@@ -242,6 +337,7 @@ export default function PropRoomInventoryApp() {
   const [sections, setSections] = useState(sectionTitles);
   const [jobs, setJobs] = useState(starterJobs);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -538,6 +634,17 @@ export default function PropRoomInventoryApp() {
     setIsModalOpen(false);
   };
 
+  const deleteItem = async (item) => {
+    if (supabase) {
+      const { error } = await supabase.from("props").delete().eq("id", item.id);
+      if (error) return;
+      await fetchProps();
+    } else {
+      setItems((current) => current.filter((i) => i.id !== item.id));
+    }
+    setSelectedItem(null);
+  };
+
   return (
     <div className="min-h-screen bg-cream-100 text-ink-900">
       {/* Subtle background texture */}
@@ -568,6 +675,12 @@ export default function PropRoomInventoryApp() {
             Add Prop
           </Button>
         </div>
+
+        <PropDetailModal
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+          onDelete={deleteItem}
+        />
 
         <Modal open={isModalOpen} onClose={() => { setSaveError(null); setIsModalOpen(false); }}>
           <div className="grid gap-5">
@@ -840,7 +953,7 @@ export default function PropRoomInventoryApp() {
         {filteredItems.length > 0 ? (
           <div className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {filteredItems.map((item) => (
-              <ItemCard key={item.id} item={item} />
+              <ItemCard key={item.id} item={item} onClick={setSelectedItem} />
             ))}
           </div>
         ) : (

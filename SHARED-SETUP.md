@@ -44,6 +44,10 @@ create policy "Allow public read"
 create policy "Allow public insert"
   on public.props for insert
   with check (true);
+
+create policy "Allow public delete"
+  on public.props for delete
+  using (true);
 ```
 
 ### 2b. Create the `jobs` and `sections` tables (shared job and category lists)
