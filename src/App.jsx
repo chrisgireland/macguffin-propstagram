@@ -368,6 +368,49 @@ function cn(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+function parseMixedNumber(value) {
+  if (value == null) return null;
+  const s = String(value).trim().toLowerCase();
+  if (!s) return null;
+
+  // Extract a leading-ish mixed number like "24 1/2", "1/2", "24.25", "24"
+  const match = s.match(/(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)/);
+  if (!match) return null;
+
+  const token = match[1];
+  if (token.includes(" ")) {
+    const [wholeRaw, fracRaw] = token.split(/\s+/);
+    const whole = Number(wholeRaw);
+    const [nRaw, dRaw] = fracRaw.split("/");
+    const n = Number(nRaw);
+    const d = Number(dRaw);
+    if (!Number.isFinite(whole) || !Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
+    return whole + n / d;
+  }
+  if (token.includes("/")) {
+    const [nRaw, dRaw] = token.split("/");
+    const n = Number(nRaw);
+    const d = Number(dRaw);
+    if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
+    return n / d;
+  }
+  const num = Number(token);
+  return Number.isFinite(num) ? num : null;
+}
+
+function parseDimsFromQuery(query) {
+  const q = String(query || "").toLowerCase();
+  // Support patterns like: "24x18", "24 × 18", "24 by 18", "24*18"
+  const m = q.match(
+    /(\d+(?:\.\d+)?(?:\s+\d+\/\d+)?|\d+\/\d+)\s*(?:x|×|\*|by)\s*(\d+(?:\.\d+)?(?:\s+\d+\/\d+)?|\d+\/\d+)/
+  );
+  if (!m) return null;
+  const a = parseMixedNumber(m[1]);
+  const b = parseMixedNumber(m[2]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return { a, b };
+}
+
 function Button({
   children,
   className = "",
@@ -1497,6 +1540,7 @@ function MyListsModal({ open, onClose }) {
 function PropRoomInventoryApp({ isEditor = true }) {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
+  const [sortMode, setSortMode] = useState("newest");
   const [activeSection, setActiveSection] = useState("All Props");
   const [sections, setSections] = useState(sectionTitles);
   const [jobs, setJobs] = useState(starterJobs);
@@ -1667,6 +1711,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
 
   const filteredItems = useMemo(() => {
     const q = search.toLowerCase().trim();
+    const dimQuery = parseDimsFromQuery(q);
     const jobFiltered =
       isEditor ? items : items.filter((item) => (item.job || "").trim() === GENERAL_INVENTORY);
 
@@ -1675,24 +1720,91 @@ function PropRoomInventoryApp({ isEditor = true }) {
         activeSection === "All Props" ||
         (item.category || "").toLowerCase() === activeSection.toLowerCase();
 
+      const len = parseMixedNumber(item.length);
+      const wid = parseMixedNumber(item.width);
+      const dimText = [item.length, item.width].filter(Boolean).join(" x ");
+      const dimTextAlt = len != null && wid != null ? `${len} x ${wid}` : "";
+      const dimTextArea = len != null && wid != null ? `${len * wid}` : "";
+
+      const matchesDimPair =
+        !dimQuery ||
+        (len != null &&
+          wid != null &&
+          ((Math.abs(len - dimQuery.a) < 1e-6 && Math.abs(wid - dimQuery.b) < 1e-6) ||
+            (Math.abs(len - dimQuery.b) < 1e-6 && Math.abs(wid - dimQuery.a) < 1e-6)));
+
       const matchesQuery =
         !q ||
-        [item.title, item.description, item.location, item.category, item.job, item.code]
+        [
+          item.title,
+          item.description,
+          item.location,
+          item.category,
+          item.job,
+          item.code,
+          item.length,
+          item.width,
+          dimText,
+          dimTextAlt,
+          dimTextArea,
+        ]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
           .includes(q);
 
-      return matchesSection && matchesQuery;
+      return matchesSection && matchesQuery && matchesDimPair;
     });
 
+    const getDate = (x) => (x?.created_at ? new Date(x.created_at) : new Date(0));
+    const getLen = (x) => parseMixedNumber(x?.length);
+    const getWid = (x) => parseMixedNumber(x?.width);
+    const getArea = (x) => {
+      const l = getLen(x);
+      const w = getWid(x);
+      return l != null && w != null ? l * w : null;
+    };
+
+    const cmpNullable = (va, vb, dir = "asc") => {
+      const aNull = va == null || !Number.isFinite(va);
+      const bNull = vb == null || !Number.isFinite(vb);
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      return dir === "asc" ? va - vb : vb - va;
+    };
+
     const sorted = [...filtered].sort((a, b) => {
-      const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
-      const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
-      return dateB - dateA;
+      if (sortMode === "newest") return getDate(b) - getDate(a);
+      if (sortMode === "oldest") return getDate(a) - getDate(b);
+      if (sortMode === "length_asc") {
+        const c = cmpNullable(getLen(a), getLen(b), "asc");
+        return c || getDate(b) - getDate(a);
+      }
+      if (sortMode === "length_desc") {
+        const c = cmpNullable(getLen(a), getLen(b), "desc");
+        return c || getDate(b) - getDate(a);
+      }
+      if (sortMode === "width_asc") {
+        const c = cmpNullable(getWid(a), getWid(b), "asc");
+        return c || getDate(b) - getDate(a);
+      }
+      if (sortMode === "width_desc") {
+        const c = cmpNullable(getWid(a), getWid(b), "desc");
+        return c || getDate(b) - getDate(a);
+      }
+      if (sortMode === "area_asc") {
+        const c = cmpNullable(getArea(a), getArea(b), "asc");
+        return c || getDate(b) - getDate(a);
+      }
+      if (sortMode === "area_desc") {
+        const c = cmpNullable(getArea(a), getArea(b), "desc");
+        return c || getDate(b) - getDate(a);
+      }
+      return getDate(b) - getDate(a);
     });
     return sorted;
-  }, [items, search, activeSection, isEditor]);
+  }, [items, search, activeSection, isEditor, sortMode]);
 
   const categoryThumbnails = useMemo(() => {
     const jobFiltered =
@@ -2426,14 +2538,33 @@ function PropRoomInventoryApp({ isEditor = true }) {
         {!loading && (
         <>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative flex-1 max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-500" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search props…"
-              className="pl-9 h-10 rounded-xl"
-            />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:flex-1">
+            <div className="relative flex-1 max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-500" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search props… (try “24x18”)"
+                className="pl-9 h-10 rounded-xl"
+              />
+            </div>
+            <div className="sm:w-56">
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value)}
+                className="h-10 w-full rounded-xl border border-ink-200 bg-cream-50 px-3 font-sans text-sm text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
+                aria-label="Sort"
+              >
+                <option value="newest">Sort: Newest</option>
+                <option value="oldest">Sort: Oldest</option>
+                <option value="length_asc">Sort: Length (L) ↑</option>
+                <option value="length_desc">Sort: Length (L) ↓</option>
+                <option value="width_asc">Sort: Width (W) ↑</option>
+                <option value="width_desc">Sort: Width (W) ↓</option>
+                <option value="area_asc">Sort: Area (L×W) ↑</option>
+                <option value="area_desc">Sort: Area (L×W) ↓</option>
+              </select>
+            </div>
           </div>
           <span className="font-sans text-sm text-ink-600">
             {items.reduce((sum, item) => sum + (item.quantity || 1), 0)} props
