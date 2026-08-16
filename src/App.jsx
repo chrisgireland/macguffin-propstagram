@@ -13,13 +13,31 @@ import {
   Loader2,
   Trash2,
   Pencil,
-  Map as MapIcon,
-  ListPlus,
-  Link2,
-  List,
   Smartphone,
+  LayoutGrid,
+  Table2,
+  Tag,
 } from "lucide-react";
-import { supabase, isSupabaseConfigured } from "./lib/supabase.js";
+import {
+  isApiConfigured,
+  fetchAuthStatus,
+  login as apiLogin,
+  fetchProps as apiFetchProps,
+  createProp,
+  updateProp,
+  deleteProp as apiDeleteProp,
+  fetchJobs as apiFetchJobs,
+  addJob as apiAddJob,
+  fetchSections as apiFetchSections,
+  addSection as apiAddSection,
+  fetchEraStyles as apiFetchEraStyles,
+  addEraStyle as apiAddEraStyle,
+  uploadPhoto,
+  hasSession,
+  getStoredRole,
+  setSession,
+  clearSession,
+} from "./lib/api.js";
 
 function getCroppedImg(image, crop) {
   if (!crop?.width || !crop?.height) return Promise.reject(new Error("No crop"));
@@ -40,124 +58,22 @@ function getCroppedImg(image, crop) {
   });
 }
 
-const AUTH_SESSION_KEY = "propstagram_authed";
-const AUTH_ROLE_KEY = "propstagram_role";
-const SHARE_LIST_IDS_KEY = "propstagram_share_list_ids";
-const DEVICE_ID_KEY = "propstagram_device_id";
-
-function getDeviceId() {
-  if (typeof window === "undefined") return "";
-  let id = localStorage.getItem(DEVICE_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem(DEVICE_ID_KEY, id);
-  }
-  return id;
-}
-
-function getListIdsKey() {
-  return `${SHARE_LIST_IDS_KEY}_${getDeviceId()}`;
-}
-
-const PASSWORD_HASH_ENV = "VITE_PASSWORD_HASH";
-const LOGINS_ENV = "VITE_LOGINS";
-
-/** Parse VITE_LOGINS (username:passwordHash:role,...) or fallback to single VITE_PASSWORD_HASH as editor. */
-function parseLogins() {
-  const loginsRaw = import.meta.env[LOGINS_ENV];
-  if (typeof loginsRaw === "string" && loginsRaw.trim()) {
-    const entries = [];
-    const parts = loginsRaw.split(",").map((p) => p.trim()).filter(Boolean);
-    for (const part of parts) {
-      // Parse so the middle (hash) can be 64 hex chars; only first and last colon are delimiters.
-      const firstColon = part.indexOf(":");
-      const lastColon = part.lastIndexOf(":");
-      if (firstColon === -1 || lastColon === -1 || firstColon === lastColon) continue;
-      const username = part.slice(0, firstColon).trim().toLowerCase();
-      const hash = part.slice(firstColon + 1, lastColon).trim().toLowerCase();
-      const role = part.slice(lastColon + 1).trim().toLowerCase();
-      if (username && hash && (role === "client" || role === "editor"))
-        entries.push({ username, passwordHash: hash, role });
-    }
-    if (entries.length) {
-      if (import.meta.env.DEV) {
-        console.log("[Login] Parsed logins:", entries.length, "→", entries.map((e) => e.username).join(", "));
-      }
-      return entries;
-    }
-  }
-  const singleHash = import.meta.env[PASSWORD_HASH_ENV];
-  if (typeof singleHash === "string" && singleHash.trim())
-    return [{ username: "editor", passwordHash: singleHash.trim().toLowerCase(), role: "editor" }];
-  return [];
-}
-
-function isPasswordProtectionEnabled() {
-  return parseLogins().length > 0;
-}
-
-function isAuthenticated() {
-  return sessionStorage.getItem(AUTH_SESSION_KEY) === "1";
-}
-
-function getAuthenticatedRole() {
-  const role = sessionStorage.getItem(AUTH_ROLE_KEY);
-  return role === "client" || role === "editor" ? role : "editor";
-}
-
-function setAuthenticated(role) {
-  sessionStorage.setItem(AUTH_SESSION_KEY, "1");
-  sessionStorage.setItem(AUTH_ROLE_KEY, role === "client" ? "client" : "editor");
-}
-
-function clearAuthenticated() {
-  sessionStorage.removeItem(AUTH_SESSION_KEY);
-  sessionStorage.removeItem(AUTH_ROLE_KEY);
-}
-
-async function hashPassword(password) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function checkPassword(enteredPassword, expectedHashHex) {
-  if (!enteredPassword || !expectedHashHex) return false;
-  const enteredHash = await hashPassword(enteredPassword);
-  return enteredHash.toLowerCase() === String(expectedHashHex).trim().toLowerCase();
-}
-
 function LoginPage({ onSuccess }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const logins = useMemo(() => parseLogins(), []);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      const u = username.trim().toLowerCase();
-      const match = logins.find((l) => l.username === u);
-      const ok = match && (await checkPassword(password, match.passwordHash));
-      if (ok) {
-        setAuthenticated(match.role);
-        onSuccess();
-      } else {
-        setError(
-          import.meta.env.DEV
-            ? "Wrong username or password. (Check the browser console to see which logins were loaded.)"
-            : "Wrong username or password"
-        );
-        setPassword("");
-      }
+      const { token, role } = await apiLogin(username.trim().toLowerCase(), password);
+      setSession(token, role);
+      onSuccess();
     } catch (err) {
-      setError(err?.message || "Login failed. Try again.");
+      setError(err?.message || "Wrong username or password");
       setPassword("");
     } finally {
       setSubmitting(false);
@@ -220,99 +136,6 @@ function LoginPage({ onSuccess }) {
   );
 }
 
-// Custom prop room map: shelf-based selection (hover to highlight, click to select shelf)
-const ROOM_MAP_URL = "/prop-room-map.svg";
-
-// Shelf regions matching placeholder SVG (viewBox 800×500), normalized to 0–1: [x, y, width, height]
-const SHELF_REGIONS = [
-  [0.05, 0.12, 0.225, 0.024], [0.05, 0.2, 0.225, 0.024], [0.05, 0.28, 0.225, 0.024], [0.05, 0.36, 0.225, 0.024], [0.05, 0.44, 0.225, 0.024],
-  [0.325, 0.12, 0.35, 0.024], [0.325, 0.2, 0.35, 0.024], [0.325, 0.28, 0.35, 0.024], [0.325, 0.36, 0.35, 0.024], [0.325, 0.44, 0.35, 0.024],
-  [0.725, 0.12, 0.225, 0.024], [0.725, 0.2, 0.225, 0.024], [0.725, 0.28, 0.225, 0.024], [0.725, 0.36, 0.225, 0.024], [0.725, 0.44, 0.225, 0.024],
-  [0.775, 0.56, 0.015, 0.32], [0.825, 0.56, 0.015, 0.32], [0.875, 0.56, 0.015, 0.32],
-  [0.35, 0.64, 0.3, 0.16],
-];
-
-function findShelfAt(map_x, map_y) {
-  if (typeof map_x !== "number" || typeof map_y !== "number") return null;
-  for (let i = 0; i < SHELF_REGIONS.length; i++) {
-    const [x, y, w, h] = SHELF_REGIONS[i];
-    if (map_x >= x && map_x <= x + w && map_y >= y && map_y <= y + h) return i;
-  }
-  return null;
-}
-
-function getShelfIndexForItem(item) {
-  if (item == null) return null;
-  if (item.shelf_index != null && Number.isInteger(item.shelf_index) && item.shelf_index >= 0 && item.shelf_index < SHELF_REGIONS.length)
-    return item.shelf_index;
-  if (typeof item.map_x === "number" && typeof item.map_y === "number") return findShelfAt(item.map_x, item.map_y);
-  return null;
-}
-
-function RoomMap({ selectShelf, selectedShelfIndex, highlightShelfIndex, className = "" }) {
-  const [hoverShelf, setHoverShelf] = useState(null);
-
-  const displayShelf = highlightShelfIndex != null ? highlightShelfIndex : (selectedShelfIndex != null ? selectedShelfIndex : hoverShelf);
-  const bounds = displayShelf != null && displayShelf >= 0 && displayShelf < SHELF_REGIONS.length ? SHELF_REGIONS[displayShelf] : null;
-  const isHighlight = highlightShelfIndex != null;
-
-  return (
-    <div
-      className={cn("relative w-full overflow-hidden rounded-2xl border border-ink-200 bg-cream-100", className)}
-      style={{ aspectRatio: "8/5" }}
-    >
-      <img
-        src={ROOM_MAP_URL}
-        alt="Prop room layout"
-        className="absolute inset-0 h-full w-full object-cover pointer-events-none"
-        draggable={false}
-      />
-      {SHELF_REGIONS.map(([x, y, w, h], i) => (
-        <button
-          key={i}
-          type="button"
-          className={cn(
-            "absolute border-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1",
-            selectShelf
-              ? "cursor-pointer border-transparent bg-transparent hover:border-amber-400 hover:bg-amber-400/30"
-              : "pointer-events-none border-transparent"
-          )}
-          style={{
-            left: `${x * 100}%`,
-            top: `${y * 100}%`,
-            width: `${w * 100}%`,
-            height: `${h * 100}%`,
-          }}
-          onClick={() => selectShelf?.(i)}
-          onMouseEnter={() => selectShelf && setHoverShelf(i)}
-          onMouseLeave={() => selectShelf && setHoverShelf(null)}
-          aria-label={selectShelf ? `Select shelf ${i + 1}` : undefined}
-        />
-      ))}
-      {bounds && !selectShelf && (
-        <div
-          className={cn(
-            "absolute border-2 pointer-events-none",
-            isHighlight ? "border-red-600 bg-red-500/50" : "border-amber-400 bg-amber-400/30"
-          )}
-          style={{
-            left: `${bounds[0] * 100}%`,
-            top: `${bounds[1] * 100}%`,
-            width: `${bounds[2] * 100}%`,
-            height: `${bounds[3] * 100}%`,
-          }}
-          aria-hidden
-        />
-      )}
-      {selectShelf && (
-        <p className="pointer-events-none absolute bottom-2 left-2 right-2 z-10 rounded-xl bg-ink-900/80 px-3 py-2 text-center text-sm text-cream-50 shadow-lg">
-          Hover a shelf to highlight it, click to select
-        </p>
-      )}
-    </div>
-  );
-}
-
 const starterItems = [];
 
 const sectionTitles = [
@@ -331,6 +154,36 @@ const sectionTitles = [
 ];
 
 const starterJobs = ["General Inventory"];
+
+const CONDITIONS = ["Excellent", "Good", "Needs Repair", "Fragile"];
+const STATUSES = ["In Stock", "Checked Out", "In Repair"];
+
+function emptyForm() {
+  return {
+    title: "",
+    description: "",
+    location: "",
+    category: "White Plateware",
+    job: "General Inventory",
+    quantity: 1,
+    photo: "",
+    length: "",
+    width: "",
+    code: "",
+    color: "",
+    condition: "",
+    era_style: "",
+    status: "In Stock",
+    tags: "",
+  };
+}
+
+function splitCommaList(value) {
+  return String(value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 function getAddAsAppInfo() {
   if (typeof navigator === "undefined") return { platform: "desktop", steps: [] };
@@ -594,7 +447,26 @@ function AddAsAppModal({ open, onClose }) {
   );
 }
 
-function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
+function TagChips({ item }) {
+  if (!item.color?.length && !item.tags?.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {item.color?.map((c) => (
+        <span key={`c-${c}`} className="inline-flex items-center rounded-full bg-cream-200 px-2.5 py-0.5 text-xs text-ink-600">
+          {c}
+        </span>
+      ))}
+      {item.tags?.map((t) => (
+        <span key={`t-${t}`} className="inline-flex items-center gap-1 rounded-full bg-cream-100 border border-ink-200 px-2.5 py-0.5 text-xs text-ink-600">
+          <Tag className="h-3 w-3" />
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ItemCard({ item, onClick, showLocation = true }) {
   return (
     <Card
       role="button"
@@ -629,22 +501,11 @@ function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
           </div>
 
           <div className="flex flex-shrink-0 flex-col gap-2 items-end">
-            {onAddToList ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="rounded-xl text-ink-600 hover:text-ink-900 -mr-1 -mt-1"
-                onClick={(e) => { e.stopPropagation(); e.preventDefault(); onAddToList(item); }}
-                aria-label="Add to list"
-              >
-                <ListPlus className="h-4 w-4" />
-              </Button>
-            ) : null}
             <Badge>{item.category || "Prop"}</Badge>
             {item.job ? (
               <Badge className="bg-cream-200/80">{item.job}</Badge>
             ) : null}
+            {item.status ? <Badge className="bg-accent/20">{item.status}</Badge> : null}
           </div>
         </div>
 
@@ -668,6 +529,10 @@ function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
             <Package2 className="h-4 w-4 text-ink-500 flex-shrink-0" />
             <span>Qty: {item.quantity || 1}</span>
           </div>
+        </div>
+
+        <div className="mt-3">
+          <TagChips item={item} />
         </div>
       </CardContent>
     </Card>
@@ -707,7 +572,7 @@ function CategoryCard({ label, photo, isActive, onClick }) {
   );
 }
 
-function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true, onAddToList, showLocation = true }) {
+function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true, showLocation = true }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   useEffect(() => {
@@ -769,18 +634,6 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canE
                   <Trash2 className="h-5 w-5" />
                 </Button>
               </>
-            )}
-            {onAddToList && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onAddToList(item)}
-                className="rounded-2xl text-ink-600 hover:text-ink-900"
-                aria-label="Add to list"
-                title="Add to list"
-              >
-                <ListPlus className="h-5 w-5" />
-              </Button>
             )}
             <Button
               variant="ghost"
@@ -846,7 +699,11 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canE
             <div className="flex flex-wrap gap-2">
               <Badge>{item.category || "Prop"}</Badge>
               {item.job ? <Badge className="bg-cream-200/80">{item.job}</Badge> : null}
+              {item.era_style ? <Badge className="bg-cream-200/80">{item.era_style}</Badge> : null}
+              {item.condition ? <Badge className="bg-cream-200/80">{item.condition}</Badge> : null}
+              {item.status ? <Badge className="bg-accent/20">{item.status}</Badge> : null}
             </div>
+            <TagChips item={item} />
             <div className="flex flex-wrap gap-4 font-sans text-sm text-ink-600">
               {item.code ? (
                 <div className="flex items-center gap-2 font-mono font-semibold text-ink-800">
@@ -876,15 +733,6 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canE
                 </div>
               ) : null}
             </div>
-
-            {getShelfIndexForItem(item) != null ? (
-              <div className="mt-6">
-                <span className="font-sans text-sm font-medium text-ink-700 block mb-2">Location on floor plan</span>
-                <div className="w-full rounded-2xl overflow-hidden border border-ink-200" style={{ aspectRatio: "8/5" }}>
-                  <RoomMap highlightShelfIndex={getShelfIndexForItem(item)} />
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
       </div>
@@ -972,568 +820,49 @@ function Lightbox({ imageUrl, onClose }) {
   );
 }
 
-function ShareView({ listId, onBack }) {
-  const [list, setList] = useState(null);
-  const [props, setProps] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [lightboxImage, setLightboxImage] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}#/share/${listId}` : "";
-
-  useEffect(() => {
-    if (!listId || !supabase) {
-      setLoading(false);
-      if (!supabase) setError("Shared lists are not configured.");
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const { data: listData, error: listErr } = await supabase
-        .from("shared_lists")
-        .select("id, name, created_at")
-        .eq("id", listId)
-        .maybeSingle();
-      if (cancelled) return;
-      if (listErr || !listData) {
-        setError("List not found.");
-        setLoading(false);
-        return;
-      }
-      setList(listData);
-      const { data: itemsData, error: itemsErr } = await supabase
-        .from("shared_list_items")
-        .select("prop_id, sort_order")
-        .eq("list_id", listId)
-        .order("sort_order");
-      if (cancelled) return;
-      if (itemsErr || !itemsData?.length) {
-        setProps([]);
-        setLoading(false);
-        return;
-      }
-      const propIds = itemsData.map((r) => r.prop_id);
-      const { data: propsData, error: propsErr } = await supabase
-        .from("props")
-        .select("id, title, description, location, category, job, quantity, photo, code, created_at")
-        .in("id", propIds);
-      if (cancelled) return;
-      const orderMap = new Map(itemsData.map((r, i) => [r.prop_id, i]));
-      const sorted = (propsData || []).slice().sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
-      setProps(sorted);
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [listId]);
-
-  const copyLink = () => {
-    if (!shareUrl) return;
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-cream-100 flex items-center justify-center p-6">
-        <Loader2 className="h-10 w-10 animate-spin text-ink-400" />
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="min-h-screen bg-cream-100 flex flex-col items-center justify-center p-6">
-        <p className="font-sans text-ink-700">{error}</p>
-        {onBack && (
-          <Button variant="outline" className="mt-4 rounded-2xl" onClick={onBack}>
-            Back to app
-          </Button>
-        )}
-      </div>
-    );
-  }
-
+function PropsTable({ items, onSelect, showLocation = true }) {
   return (
-    <div className="min-h-screen bg-cream-100 text-ink-900">
-      <div className="mx-auto max-w-4xl px-4 py-8">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="font-sans text-2xl font-semibold text-ink-900">
-              {list?.name || "Shared list"}
-            </h1>
-            <p className="mt-1 text-sm text-ink-600">
-              {props.length} {props.length === 1 ? "prop" : "props"}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              variant="primary"
-              className="rounded-2xl"
-              onClick={copyLink}
+    <div className="mt-6 overflow-x-auto rounded-2xl border border-ink-200 bg-cream-50">
+      <table className="w-full min-w-[900px] text-left text-sm">
+        <thead>
+          <tr className="border-b border-ink-200 text-ink-600">
+            <th className="px-4 py-3 font-medium">Title</th>
+            <th className="px-4 py-3 font-medium">Code</th>
+            <th className="px-4 py-3 font-medium">Category</th>
+            <th className="px-4 py-3 font-medium">Job</th>
+            <th className="px-4 py-3 font-medium">Qty</th>
+            <th className="px-4 py-3 font-medium">Dimensions</th>
+            <th className="px-4 py-3 font-medium">Condition</th>
+            <th className="px-4 py-3 font-medium">Era/Style</th>
+            <th className="px-4 py-3 font-medium">Status</th>
+            {showLocation && <th className="px-4 py-3 font-medium">Location</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr
+              key={item.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(item)}
+              onKeyDown={(e) => e.key === "Enter" && onSelect(item)}
+              className="cursor-pointer border-b border-ink-100 last:border-0 hover:bg-cream-100"
             >
-              <Link2 className="mr-2 h-4 w-4" />
-              {copied ? "Copied!" : "Copy link"}
-            </Button>
-            {onBack && (
-              <Button type="button" variant="outline" className="rounded-2xl" onClick={onBack}>
-                Back to app
-              </Button>
-            )}
-          </div>
-        </div>
-        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {props.map((item) => (
-            <ItemCard key={item.id} item={item} onClick={setSelectedItem} />
+              <td className="px-4 py-3 font-medium text-ink-900">{item.title}</td>
+              <td className="px-4 py-3 font-mono text-ink-700">{item.code || "—"}</td>
+              <td className="px-4 py-3 text-ink-700">{item.category || "—"}</td>
+              <td className="px-4 py-3 text-ink-700">{item.job || "—"}</td>
+              <td className="px-4 py-3 text-ink-700">{item.quantity || 1}</td>
+              <td className="px-4 py-3 text-ink-700">{[item.length, item.width].filter(Boolean).join(" × ") || "—"}</td>
+              <td className="px-4 py-3 text-ink-700">{item.condition || "—"}</td>
+              <td className="px-4 py-3 text-ink-700">{item.era_style || "—"}</td>
+              <td className="px-4 py-3 text-ink-700">{item.status || "—"}</td>
+              {showLocation && <td className="px-4 py-3 text-ink-700">{item.location || "—"}</td>}
+            </tr>
           ))}
-        </div>
-        {props.length === 0 && (
-          <p className="mt-8 text-center font-sans text-ink-600">This list has no props yet.</p>
-        )}
-      </div>
-      {selectedItem && (
-        <PropDetailModal
-          item={selectedItem}
-          onClose={() => setSelectedItem(null)}
-          onDelete={() => {}}
-          onEdit={() => {}}
-          onOpenLightbox={setLightboxImage}
-          canEdit={false}
-        />
-      )}
-      <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
+        </tbody>
+      </table>
     </div>
-  );
-}
-
-function AddToListModal({ open, item, onClose }) {
-  const [newListName, setNewListName] = useState("");
-  const [myLists, setMyLists] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createdListId, setCreatedListId] = useState(null);
-  const [shareUrl, setShareUrl] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [addingId, setAddingId] = useState(null);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    if (!open || !item || !supabase) return;
-    setCreatedListId(null);
-    setShareUrl("");
-    setNewListName("");
-    setMessage("");
-    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
-    if (!ids.length) {
-      setMyLists([]);
-      return;
-    }
-    setLoading(true);
-    supabase
-      .from("shared_lists")
-      .select("id, name")
-      .in("id", ids)
-      .then(({ data }) => {
-        setMyLists(data || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [open, item?.id]);
-
-  const createList = async () => {
-    if (!item || !supabase) return;
-    setCreating(true);
-    const { data: listRow, error: listErr } = await supabase
-      .from("shared_lists")
-      .insert({ name: newListName.trim() || null })
-      .select("id")
-      .single();
-    if (listErr || !listRow) {
-      setMessage("Could not create list. Try again.");
-      setCreating(false);
-      return;
-    }
-    const listId = listRow.id;
-    const { error: itemErr } = await supabase
-      .from("shared_list_items")
-      .insert({ list_id: listId, prop_id: item.id });
-    if (itemErr) {
-      setMessage("List created but could not add prop. Try adding it from the list.");
-    }
-    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
-    if (!ids.includes(listId)) {
-      localStorage.setItem(getListIdsKey(), JSON.stringify([...ids, listId]));
-    }
-    setCreatedListId(listId);
-    setShareUrl(`${window.location.origin}${window.location.pathname}#/share/${listId}`);
-    setMyLists((prev) => [...prev, { id: listId, name: newListName.trim() || "Untitled list" }]);
-    setCreating(false);
-  };
-
-  const addToList = async (listId) => {
-    if (!item || !supabase) return;
-    setAddingId(listId);
-    const { error } = await supabase
-      .from("shared_list_items")
-      .upsert({ list_id: listId, prop_id: item.id }, { onConflict: "list_id,prop_id" });
-    setAddingId(null);
-    if (error) setMessage("Could not add to list.");
-    else setMessage("Added to list.");
-  };
-
-  const copyShareLink = () => {
-    if (!shareUrl) return;
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  if (!open) return null;
-  return (
-    <Modal open={true} onClose={onClose} title="Add to list">
-      <div className="space-y-6">
-        {message && (
-          <p className={cn("text-sm", message.startsWith("Could") ? "text-red-600" : "text-ink-700")}>
-            {message}
-          </p>
-        )}
-        {!createdListId ? (
-          <>
-            <div>
-              <Label className="block mb-2">Create new list</Label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newListName}
-                  onChange={(e) => setNewListName(e.target.value)}
-                  placeholder="List name (optional)"
-                  className="h-11 flex-1 rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 placeholder:text-ink-500 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
-                />
-                <Button
-                  type="button"
-                  variant="primary"
-                  className="rounded-2xl shrink-0"
-                  onClick={createList}
-                  disabled={creating}
-                >
-                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create"}
-                </Button>
-              </div>
-            </div>
-            {loading ? (
-              <p className="text-sm text-ink-600">Loading your lists…</p>
-            ) : myLists.length > 0 ? (
-              <div>
-                <Label className="block mb-2">Add to existing list</Label>
-                <ul className="space-y-2">
-                  {myLists.map((list) => (
-                    <li key={list.id} className="flex items-center justify-between rounded-2xl border border-ink-200 bg-cream-50 px-4 py-2">
-                      <span className="font-sans text-ink-900">{list.name || "Untitled list"}</span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="default"
-                        className="rounded-xl"
-                        onClick={() => addToList(list.id)}
-                        disabled={addingId === list.id}
-                      >
-                        {addingId === list.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <div className="rounded-2xl border border-ink-200 bg-cream-100 p-4">
-            <p className="font-sans text-sm font-medium text-ink-800">List created. Share this link:</p>
-            <div className="mt-2 flex gap-2">
-              <input
-                type="text"
-                readOnly
-                value={shareUrl}
-                className="flex-1 rounded-xl border border-ink-200 bg-cream-50 px-3 py-2 font-mono text-sm text-ink-700"
-              />
-              <Button type="button" variant="primary" className="rounded-xl shrink-0" onClick={copyShareLink}>
-                {copied ? "Copied!" : "Copy"}
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-function MyListsModal({ open, onClose }) {
-  const [lists, setLists] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [copiedId, setCopiedId] = useState(null);
-  const [editingListId, setEditingListId] = useState(null);
-  const [editingName, setEditingName] = useState("");
-  const [deletingId, setDeletingId] = useState(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-
-  const fetchLists = useCallback(async () => {
-    if (!supabase) return;
-    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
-    if (!ids.length) {
-      setLists([]);
-      return;
-    }
-    const { data: listsData } = await supabase
-      .from("shared_lists")
-      .select("id, name")
-      .in("id", ids);
-    if (!listsData?.length) {
-      setLists([]);
-      return;
-    }
-    const { data: itemsData } = await supabase
-      .from("shared_list_items")
-      .select("list_id, prop_id")
-      .in("list_id", ids);
-    const propIds = [...new Set((itemsData || []).map((r) => r.prop_id))];
-    const { data: propsData } = propIds.length
-      ? await supabase.from("props").select("id, title").in("id", propIds)
-      : { data: [] };
-    const propsById = new Map((propsData || []).map((p) => [p.id, p.title || "Untitled"]));
-    const itemsByListId = new Map();
-    for (const r of itemsData || []) {
-      if (!itemsByListId.has(r.list_id)) itemsByListId.set(r.list_id, []);
-      itemsByListId.get(r.list_id).push(propsById.get(r.prop_id) || "Untitled");
-    }
-    setLists(
-      listsData.map((list) => ({
-        id: list.id,
-        name: list.name || "Untitled list",
-        propTitles: itemsByListId.get(list.id) || [],
-      }))
-    );
-  }, []);
-
-  useEffect(() => {
-    if (!open || !supabase) return;
-    setLists([]);
-    setEditingListId(null);
-    setConfirmDeleteId(null);
-    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
-    if (!ids.length) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    fetchLists().then(() => setLoading(false));
-  }, [open, fetchLists]);
-
-  const copyLink = (listId) => {
-    const url = `${window.location.origin}${window.location.pathname}#/share/${listId}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedId(listId);
-      setTimeout(() => setCopiedId(null), 2000);
-    });
-  };
-
-  const startRename = (list, e) => {
-    e.stopPropagation();
-    setEditingListId(list.id);
-    setEditingName(list.name);
-  };
-
-  const saveRename = async (e) => {
-    e?.stopPropagation();
-    if (!editingListId || !supabase) return;
-    const name = editingName.trim() || "Untitled list";
-    const { error } = await supabase.from("shared_lists").update({ name }).eq("id", editingListId);
-    if (!error) {
-      setLists((prev) =>
-        prev.map((l) => (l.id === editingListId ? { ...l, name } : l))
-      );
-    }
-    setEditingListId(null);
-  };
-
-  const cancelRename = (e) => {
-    e?.stopPropagation();
-    setEditingListId(null);
-  };
-
-  const confirmDelete = (listId, e) => {
-    e?.stopPropagation();
-    setConfirmDeleteId(listId);
-  };
-
-  const cancelDelete = (e) => {
-    e?.stopPropagation();
-    setConfirmDeleteId(null);
-  };
-
-  const deleteList = async (listId, e) => {
-    e?.stopPropagation();
-    if (!supabase) return;
-    setDeletingId(listId);
-    const { error } = await supabase.from("shared_lists").delete().eq("id", listId);
-    setDeletingId(null);
-    setConfirmDeleteId(null);
-    if (!error) {
-      const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
-      localStorage.setItem(getListIdsKey(), JSON.stringify(ids.filter((id) => id !== listId)));
-      setLists((prev) => prev.filter((l) => l.id !== listId));
-    }
-  };
-
-  if (!open) return null;
-  return (
-    <Modal open={true} onClose={onClose} title="Your lists">
-      <div className="space-y-4">
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-ink-400" />
-          </div>
-        ) : lists.length === 0 ? (
-          <p className="font-sans text-ink-600 py-4">
-            You haven&apos;t created any lists yet. Use &quot;Add to list&quot; on a prop card or in the prop detail view to create one.
-          </p>
-        ) : (
-          <ul className="space-y-4">
-            {lists.map((list) => (
-              <li
-                key={list.id}
-                role={editingListId === list.id ? undefined : "button"}
-                tabIndex={editingListId === list.id ? undefined : 0}
-                onClick={
-                  editingListId === list.id
-                    ? undefined
-                    : () => {
-                        window.location.hash = `#/share/${list.id}`;
-                        onClose();
-                      }
-                }
-                onKeyDown={
-                  editingListId === list.id
-                    ? undefined
-                    : (e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          window.location.hash = `#/share/${list.id}`;
-                          onClose();
-                        }
-                      }
-                }
-                className={cn(
-                  "rounded-2xl border border-ink-200 bg-cream-50 p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2",
-                  editingListId !== list.id && "cursor-pointer hover:bg-cream-100 hover:border-ink-300"
-                )}
-              >
-                {confirmDeleteId === list.id ? (
-                  <div className="flex flex-wrap items-center gap-2 py-1" onClick={(e) => e.stopPropagation()}>
-                    <span className="font-sans text-sm text-ink-700">Delete this list?</span>
-                    <Button type="button" variant="outline" size="default" className="rounded-xl" onClick={(e) => deleteList(list.id, e)}>
-                      Delete
-                    </Button>
-                    <Button type="button" variant="ghost" size="default" className="rounded-xl" onClick={cancelDelete}>
-                      Cancel
-                    </Button>
-                  </div>
-                ) : editingListId === list.id ? (
-                  <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="text"
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && saveRename(e)}
-                      className="h-9 flex-1 min-w-[120px] rounded-xl border border-ink-200 bg-cream-50 px-3 font-sans text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
-                      placeholder="List name"
-                      autoFocus
-                    />
-                    <Button type="button" variant="primary" size="default" className="rounded-xl shrink-0" onClick={saveRename}>
-                      Save
-                    </Button>
-                    <Button type="button" variant="ghost" size="default" className="rounded-xl shrink-0" onClick={cancelRename}>
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-sans font-semibold text-ink-900">
-                          {list.name}
-                        </h3>
-                        <p className="mt-1 text-sm text-ink-600">
-                          {list.propTitles.length} {list.propTitles.length === 1 ? "prop" : "props"}
-                        </p>
-                        {list.propTitles.length > 0 && (
-                          <ul className="mt-2 space-y-1 text-sm text-ink-700">
-                            {list.propTitles.map((title, i) => (
-                              <li key={i} className="truncate">• {title}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="rounded-xl text-ink-600 hover:text-ink-900"
-                          onClick={(e) => startRename(list, e)}
-                          aria-label="Rename list"
-                          title="Rename list"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700"
-                          onClick={(e) => confirmDelete(list.id, e)}
-                          disabled={deletingId === list.id}
-                          aria-label="Delete list"
-                          title="Delete list"
-                        >
-                          {deletingId === list.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="default"
-                          className="rounded-xl shrink-0"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            copyLink(list.id);
-                          }}
-                          aria-label="Copy share link"
-                        >
-                          {copiedId === list.id ? (
-                            "Copied!"
-                          ) : (
-                            <>
-                              <Link2 className="mr-1.5 h-4 w-4" />
-                              Share
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </Modal>
   );
 }
 
@@ -1544,107 +873,82 @@ function PropRoomInventoryApp({ isEditor = true }) {
   const [activeSection, setActiveSection] = useState("All Props");
   const [sections, setSections] = useState(sectionTitles);
   const [jobs, setJobs] = useState(starterJobs);
+  const [eraStyles, setEraStyles] = useState([]);
+  const [viewMode, setViewMode] = useState("gallery");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
-  const [mapPickerOpen, setMapPickerOpen] = useState(false);
   const [photoToCrop, setPhotoToCrop] = useState(null);
-  const [addToListItem, setAddToListItem] = useState(null);
-  const [listsModalOpen, setListsModalOpen] = useState(false);
   const [addAsAppOpen, setAddAsAppOpen] = useState(false);
-  const [form, setForm] = useState({
-    title: "",
-    description: "",
-    location: "",
-    category: "White Plateware",
-    job: "General Inventory",
-    quantity: 1,
-    photo: "",
-    latitude: null,
-    longitude: null,
-    map_x: null,
-    map_y: null,
-    shelf_index: null,
-    length: "",
-    width: "",
-    code: "",
-  });
+  const [form, setForm] = useState(emptyForm());
 
   const cameraInputRef = useRef(null);
   const libraryInputRef = useRef(null);
   const formPhotoFileRef = useRef(null);
 
-  const [loading, setLoading] = useState(isSupabaseConfigured());
+  const [loading, setLoading] = useState(isApiConfigured());
   const [saveError, setSaveError] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const availableSections = sections.filter((s) => s !== "All Props");
 
-  const fetchProps = useCallback(async () => {
-    if (!supabase) {
+  const fetchPropsData = useCallback(async () => {
+    if (!isApiConfigured()) {
       setLoading(false);
       return;
     }
     setLoading(true);
     setSaveError(null);
-    const { data, error } = await supabase
-      .from("props")
-      .select("id, title, description, location, category, job, quantity, photo, latitude, longitude, map_x, map_y, shelf_index, length, width, code, created_at")
-      .order("created_at", { ascending: false });
-    if (error) {
-      setSaveError("Could not load props. Check your Supabase setup.");
+    try {
+      const data = await apiFetchProps();
+      setItems(data);
+    } catch (err) {
+      setSaveError(err?.message || "Could not load props. Check your API setup.");
+    } finally {
       setLoading(false);
-      return;
     }
-    setItems(data || []);
-    setLoading(false);
   }, []);
 
-  const fetchJobs = useCallback(async () => {
-    if (!supabase) return;
-    const { data, error } = await supabase.from("jobs").select("name").order("created_at");
-    if (error) return;
-    setJobs(data?.length ? data.map((r) => r.name) : starterJobs);
+  const fetchJobsData = useCallback(async () => {
+    if (!isApiConfigured()) return;
+    try {
+      const names = await apiFetchJobs();
+      setJobs(names.length ? names : starterJobs);
+    } catch {
+      // keep existing jobs on failure
+    }
   }, []);
 
-  const fetchSections = useCallback(async () => {
-    if (!supabase) return;
-    const { data, error } = await supabase
-      .from("sections")
-      .select("name, sort_order")
-      .order("sort_order");
-    if (error) return;
-    const names = data?.length ? data.map((r) => r.name) : sectionTitles.filter((s) => s !== "All Props");
-    setSections(["All Props", ...names]);
+  const fetchSectionsData = useCallback(async () => {
+    if (!isApiConfigured()) return;
+    try {
+      const names = await apiFetchSections();
+      setSections(["All Props", ...(names.length ? names : sectionTitles.filter((s) => s !== "All Props"))]);
+    } catch {
+      // keep existing sections on failure
+    }
+  }, []);
+
+  const fetchEraStylesData = useCallback(async () => {
+    if (!isApiConfigured()) return;
+    try {
+      setEraStyles(await apiFetchEraStyles());
+    } catch {
+      // keep existing era styles on failure
+    }
   }, []);
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
+    if (!isApiConfigured()) return; // initial state already covers this case
     let cancelled = false;
     (async () => {
-      await fetchProps();
+      await fetchPropsData();
       if (cancelled) return;
-      await Promise.all([fetchJobs(), fetchSections()]);
+      await Promise.all([fetchJobsData(), fetchSectionsData(), fetchEraStylesData()]);
     })();
     return () => { cancelled = true; };
-  }, [fetchProps, fetchJobs, fetchSections]);
-
-  useEffect(() => {
-    if (!supabase) return;
-    const channel = supabase
-      .channel("shared-data")
-      .on("postgres_changes", { event: "*", schema: "public", table: "props" }, fetchProps)
-      .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, fetchJobs)
-      .on("postgres_changes", { event: "*", schema: "public", table: "sections" }, fetchSections)
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchProps, fetchJobs, fetchSections]);
+  }, [fetchPropsData, fetchJobsData, fetchSectionsData, fetchEraStylesData]);
 
   const addSection = async () => {
     const nextSection = window.prompt("Add a new section name");
@@ -1659,22 +963,13 @@ function PropRoomInventoryApp({ isEditor = true }) {
       return;
     }
 
-    if (supabase) {
-      const { data: maxRow } = await supabase
-        .from("sections")
-        .select("sort_order")
-        .order("sort_order", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const nextOrder = (maxRow?.sort_order ?? 0) + 1;
-      const { error } = await supabase.from("sections").insert({ name: title, sort_order: nextOrder });
-      if (error) {
-        if (error.code === "23505") {
-          setForm((current) => ({ ...current, category: title }));
-        }
+    if (isApiConfigured()) {
+      try {
+        await apiAddSection(title);
+        await fetchSectionsData();
+      } catch {
         return;
       }
-      await fetchSections();
     } else {
       setSections((current) => [...current, title]);
     }
@@ -1694,17 +989,43 @@ function PropRoomInventoryApp({ isEditor = true }) {
       return;
     }
 
-    if (supabase) {
-      const { error } = await supabase.from("jobs").insert({ name: title });
-      if (error) {
-        if (error.code === "23505") setForm((current) => ({ ...current, job: title }));
+    if (isApiConfigured()) {
+      try {
+        await apiAddJob(title);
+        await fetchJobsData();
+      } catch {
         return;
       }
-      await fetchJobs();
     } else {
       setJobs((current) => [...current, title]);
     }
     setForm((current) => ({ ...current, job: title }));
+  };
+
+  const addEraStyle = async () => {
+    const nextEra = window.prompt("Add a new era/style name");
+    if (!nextEra) return;
+
+    const title = nextEra.trim();
+    if (!title) return;
+
+    const existingEra = eraStyles.find((e) => e.toLowerCase() === title.toLowerCase());
+    if (existingEra) {
+      setForm((current) => ({ ...current, era_style: existingEra }));
+      return;
+    }
+
+    if (isApiConfigured()) {
+      try {
+        await apiAddEraStyle(title);
+        await fetchEraStylesData();
+      } catch {
+        return;
+      }
+    } else {
+      setEraStyles((current) => [...current, title]);
+    }
+    setForm((current) => ({ ...current, era_style: title }));
   };
 
   const GENERAL_INVENTORY = "General Inventory";
@@ -1747,6 +1068,11 @@ function PropRoomInventoryApp({ isEditor = true }) {
           dimText,
           dimTextAlt,
           dimTextArea,
+          item.era_style,
+          item.condition,
+          item.status,
+          ...(item.color || []),
+          ...(item.tags || []),
         ]
           .filter(Boolean)
           .join(" ")
@@ -1869,23 +1195,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
     setEditingId(null);
     setForm((current) => {
       revokePhotoUrl(current.photo);
-      return {
-        title: "",
-        description: "",
-        location: "",
-        category: "White Plateware",
-        job: "General Inventory",
-        quantity: 1,
-        photo: "",
-        latitude: null,
-        longitude: null,
-        map_x: null,
-        map_y: null,
-        shelf_index: null,
-        length: "",
-        width: "",
-        code: "",
-      };
+      return emptyForm();
     });
   };
 
@@ -1898,23 +1208,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
     formPhotoFileRef.current = null;
     setForm((prev) => {
       revokePhotoUrl(prev.photo);
-      return {
-        title: "",
-        description: "",
-        location: "",
-        category: "White Plateware",
-        job: "General Inventory",
-        quantity: 1,
-        photo: "",
-        latitude: null,
-        longitude: null,
-        map_x: null,
-        map_y: null,
-        shelf_index: null,
-        length: "",
-        width: "",
-        code: generateCode(),
-      };
+      return { ...emptyForm(), code: generateCode() };
     });
     setIsModalOpen(true);
   };
@@ -1928,14 +1222,14 @@ function PropRoomInventoryApp({ isEditor = true }) {
       job: item.job || "General Inventory",
       quantity: item.quantity ?? 1,
       photo: item.photo || "",
-      latitude: item.latitude ?? null,
-      longitude: item.longitude ?? null,
-      map_x: item.map_x ?? null,
-      map_y: item.map_y ?? null,
-      shelf_index: item.shelf_index ?? null,
       length: item.length ?? "",
       width: item.width ?? "",
       code: item.code ?? "",
+      color: (item.color || []).join(", "),
+      condition: item.condition || "",
+      era_style: item.era_style || "",
+      status: item.status || "In Stock",
+      tags: (item.tags || []).join(", "),
     });
     setEditingId(item.id);
     setSaveError(null);
@@ -1956,87 +1250,48 @@ function PropRoomInventoryApp({ isEditor = true }) {
       category: form.category,
       job: form.job.trim(),
       quantity: Math.max(1, Number(form.quantity || 1)),
-      latitude:
-        typeof form.latitude === "number" && !Number.isNaN(form.latitude) ? form.latitude : null,
-      longitude:
-        typeof form.longitude === "number" && !Number.isNaN(form.longitude) ? form.longitude : null,
-      map_x:
-        typeof form.map_x === "number" && !Number.isNaN(form.map_x) ? form.map_x : null,
-      map_y:
-        typeof form.map_y === "number" && !Number.isNaN(form.map_y) ? form.map_y : null,
-      shelf_index:
-        form.shelf_index != null && Number.isInteger(form.shelf_index) && form.shelf_index >= 0 ? form.shelf_index : null,
       length: form.length?.trim() || null,
       width: form.width?.trim() || null,
       code: form.code?.trim() || null,
+      color: splitCommaList(form.color),
+      condition: form.condition || null,
+      era_style: form.era_style?.trim() || null,
+      status: form.status || null,
+      tags: splitCommaList(form.tags),
     };
 
-    if (supabase) {
+    if (isApiConfigured()) {
       setSaving(true);
-      console.log("[Save] Using Supabase, payload keys:", Object.keys(payload));
       try {
         let photoUrl = "";
 
         const file = formPhotoFileRef.current;
         if (file) {
-          const ext = file.name.split(".").pop() || "jpg";
-          const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-          const { error: uploadError } = await supabase.storage
-            .from("prop-photos")
-            .upload(path, file, { cacheControl: "3600", upsert: false });
-          if (uploadError) {
-            console.error("[Save] Photo upload error:", uploadError);
-            setSaveError("Photo upload failed. You can save without a photo and try again.");
+          try {
+            photoUrl = await uploadPhoto(file);
+          } catch (err) {
+            setSaveError(err?.message || "Photo upload failed. You can save without a photo and try again.");
             return;
           }
-          const { data: urlData } = supabase.storage.from("prop-photos").getPublicUrl(path);
-          photoUrl = urlData?.publicUrl ?? "";
         } else if (form.photo && !form.photo.startsWith("blob:")) {
           photoUrl = form.photo;
         }
         payload.photo = photoUrl || null;
 
         if (editingId) {
-          const { data: updateData, error } = await supabase.from("props").update(payload).eq("id", editingId).select();
-          if (error) {
-            console.error("[Save] Update error:", error);
-            setSaveError(error.message || "Failed to update prop.");
-            return;
-          }
+          await updateProp(editingId, payload);
         } else {
-          const { data: insertData, error } = await supabase.from("props").insert(payload).select();
-          if (error) {
-            console.error("[Save] Insert error:", error);
-            setSaveError(error.message || "Failed to save prop.");
-            return;
-          }
+          await createProp(payload);
         }
-        console.log("[Save] Success.");
+
         formPhotoFileRef.current = null;
-        setForm({
-          title: "",
-          description: "",
-          location: "",
-          category: "White Plateware",
-          job: "General Inventory",
-          quantity: 1,
-          photo: "",
-          latitude: null,
-          longitude: null,
-          map_x: null,
-          map_y: null,
-          shelf_index: null,
-          length: "",
-          width: "",
-          code: "",
-        });
+        setForm(emptyForm());
         setEditingId(null);
         setIsModalOpen(false);
-        await fetchProps();
+        await fetchPropsData();
         setSelectedItem(null);
       } catch (err) {
-        console.error("[Save] Exception:", err);
-        setSaveError(err?.message || String(err) || "Something went wrong. Try again.");
+        setSaveError(err?.message || "Something went wrong. Try again.");
       } finally {
         setSaving(false);
       }
@@ -2067,32 +1322,19 @@ function PropRoomInventoryApp({ isEditor = true }) {
       ]);
     }
 
-    setForm({
-      title: "",
-      description: "",
-      location: "",
-      category: "White Plateware",
-      job: "General Inventory",
-      quantity: 1,
-      photo: "",
-      latitude: null,
-      longitude: null,
-      map_x: null,
-      map_y: null,
-      shelf_index: null,
-      length: "",
-      width: "",
-      code: "",
-    });
+    setForm(emptyForm());
     setEditingId(null);
     setIsModalOpen(false);
   };
 
   const deleteItem = async (item) => {
-    if (supabase) {
-      const { error } = await supabase.from("props").delete().eq("id", item.id);
-      if (error) return;
-      await fetchProps();
+    if (isApiConfigured()) {
+      try {
+        await apiDeleteProp(item.id);
+        await fetchPropsData();
+      } catch {
+        return;
+      }
     } else {
       setItems((current) => current.filter((i) => i.id !== item.id));
     }
@@ -2133,18 +1375,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 Add as app
               </Button>
             )}
-            {supabase && (
-              <Button
-                type="button"
-                onClick={() => setListsModalOpen(true)}
-                variant="outline"
-                size="default"
-                className="rounded-2xl shrink-0"
-              >
-                <List className="mr-2 h-4 w-4" />
-                Lists
-              </Button>
-            )}
             {isEditor && (
               <Button
                 onClick={openAddForm}
@@ -2166,7 +1396,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
           onEdit={openEditForm}
           onOpenLightbox={setLightboxImage}
           canEdit={isEditor}
-          onAddToList={(it) => setAddToListItem(it)}
           showLocation={isEditor}
         />
 
@@ -2174,15 +1403,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
           src={photoToCrop}
           onComplete={handleCropComplete}
           onCancel={handleCropCancel}
-        />
-        <AddToListModal
-          open={!!addToListItem}
-          item={addToListItem}
-          onClose={() => setAddToListItem(null)}
-        />
-        <MyListsModal
-          open={listsModalOpen}
-          onClose={() => setListsModalOpen(false)}
         />
         <AddAsAppModal open={addAsAppOpen} onClose={() => setAddAsAppOpen(false)} />
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
@@ -2220,7 +1440,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 className="min-h-24"
-                placeholder="Color, material, era, condition, or where it works best on set"
+                placeholder="Material, quirks, rental restrictions, or where it works best on set"
               />
             </div>
 
@@ -2231,50 +1451,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 onChange={(e) => setForm({ ...form, location: e.target.value })}
                 placeholder="Shelf B3 · Wall 2"
               />
-            </div>
-
-            <div>
-              <Label className="block mb-1.5">Shelf on floor plan (optional)</Label>
-              <p className="mb-2 text-sm text-ink-600">
-                Click the map and then click a shelf to assign this prop to that shelf.
-              </p>
-              {form.shelf_index != null && form.shelf_index >= 0 ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-xl bg-cream-200 px-3 py-2 font-sans text-sm text-ink-700">
-                    Shelf {form.shelf_index + 1} selected
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="default"
-                    className="rounded-xl"
-                    onClick={() => setForm({ ...form, shelf_index: null })}
-                  >
-                    Clear
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="default"
-                    className="rounded-xl"
-                    onClick={() => setMapPickerOpen(true)}
-                  >
-                    <MapIcon className="mr-1.5 h-4 w-4" />
-                    Change shelf
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="default"
-                  className="rounded-xl"
-                  onClick={() => setMapPickerOpen(true)}
-                >
-                  <MapIcon className="mr-1.5 h-4 w-4" />
-                  Select shelf on map
-                </Button>
-              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -2293,6 +1469,34 @@ function PropRoomInventoryApp({ isEditor = true }) {
                   onChange={(e) => setForm({ ...form, width: e.target.value })}
                   placeholder="e.g. 18"
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="block mb-1.5">Condition</Label>
+                <select
+                  value={form.condition}
+                  onChange={(e) => setForm({ ...form, condition: e.target.value })}
+                  className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
+                >
+                  <option value="">None</option>
+                  {CONDITIONS.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="block mb-1.5">Status</Label>
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
+                >
+                  {STATUSES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -2318,6 +1522,32 @@ function PropRoomInventoryApp({ isEditor = true }) {
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Add New Section
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Era / Style</Label>
+              <select
+                value={form.era_style}
+                onChange={(e) => setForm({ ...form, era_style: e.target.value })}
+                className="h-11 w-full rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-colors"
+              >
+                <option value="">None</option>
+                {eraStyles.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={addEraStyle}
+                className="w-full rounded-2xl"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add New Era/Style
               </Button>
             </div>
 
@@ -2355,6 +1585,25 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 onChange={(e) => setForm({ ...form, quantity: e.target.value })}
                 placeholder="1"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="block mb-1.5">Color</Label>
+                <Input
+                  value={form.color}
+                  onChange={(e) => setForm({ ...form, color: e.target.value })}
+                  placeholder="Red, Gold, Navy"
+                />
+              </div>
+              <div>
+                <Label className="block mb-1.5">Tags</Label>
+                <Input
+                  value={form.tags}
+                  onChange={(e) => setForm({ ...form, tags: e.target.value })}
+                  placeholder="rustic, hero-prop, fragile"
+                />
+              </div>
             </div>
 
             <div>
@@ -2470,22 +1719,6 @@ function PropRoomInventoryApp({ isEditor = true }) {
           </div>
         </Modal>
 
-        <Modal
-          open={mapPickerOpen}
-          onClose={() => setMapPickerOpen(false)}
-          title="Select a shelf"
-        >
-          <div className="w-full" style={{ aspectRatio: "8/5" }}>
-            <RoomMap
-              selectShelf={(index) => {
-                setForm((f) => ({ ...f, shelf_index: index }));
-                setMapPickerOpen(false);
-              }}
-              selectedShelfIndex={form.shelf_index}
-            />
-          </div>
-        </Modal>
-
         {loading ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -2510,7 +1743,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
               <Button
                 type="button"
                 variant="outline"
-                onClick={fetchProps}
+                onClick={fetchPropsData}
                 className="mt-4 rounded-2xl"
               >
                 Retry
@@ -2544,7 +1777,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search props… (try “24x18”)"
+                placeholder="Search props… (try “24x18” or a tag)"
                 className="pl-9 h-10 rounded-xl"
               />
             </div>
@@ -2565,6 +1798,32 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 <option value="area_desc">Sort: Area (L×W) ↓</option>
               </select>
             </div>
+            <div className="flex items-center gap-1 rounded-xl border border-ink-200 bg-cream-50 p-1">
+              <button
+                type="button"
+                onClick={() => setViewMode("gallery")}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                  viewMode === "gallery" ? "bg-ink-900 text-cream-50" : "text-ink-500 hover:text-ink-900"
+                )}
+                aria-label="Gallery view"
+                aria-pressed={viewMode === "gallery"}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                  viewMode === "table" ? "bg-ink-900 text-cream-50" : "text-ink-500 hover:text-ink-900"
+                )}
+                aria-label="Table view"
+                aria-pressed={viewMode === "table"}
+              >
+                <Table2 className="h-4 w-4" />
+              </button>
+            </div>
           </div>
           <span className="font-sans text-sm text-ink-600">
             {items.reduce((sum, item) => sum + (item.quantity || 1), 0)} props
@@ -2578,19 +1837,22 @@ function PropRoomInventoryApp({ isEditor = true }) {
           </p>
         </div>
 
-        {/* Item grid or empty state */}
+        {/* Item grid/table or empty state */}
         {filteredItems.length > 0 ? (
-          <div className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {filteredItems.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                onClick={setSelectedItem}
-                onAddToList={supabase ? (it) => setAddToListItem(it) : undefined}
-                showLocation={isEditor}
-              />
-            ))}
-          </div>
+          viewMode === "table" ? (
+            <PropsTable items={filteredItems} onSelect={setSelectedItem} showLocation={isEditor} />
+          ) : (
+            <div className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {filteredItems.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  onClick={setSelectedItem}
+                  showLocation={isEditor}
+                />
+              ))}
+            </div>
+          )
         ) : (
           <Card className="mt-6 border-dashed border-ink-300 bg-cream-50/80">
             <CardContent className="flex flex-col items-center justify-center py-20 text-center">
@@ -2627,22 +1889,34 @@ function PropRoomInventoryApp({ isEditor = true }) {
 const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
 
 function AppWithAuth({ hash = "" }) {
-  const [authed, setAuthed] = useState(() => isAuthenticated());
-  const protected_ = isPasswordProtectionEnabled();
+  const [authed, setAuthed] = useState(() => hasSession());
+  const [protectedState, setProtectedState] = useState(isApiConfigured() ? null : false);
   const inactivityTimerRef = useRef(null);
-  const shareMatch = (hash || window.location.hash).match(/^#\/share\/([a-f0-9-]{36})$/i);
+  const currentHash = hash || window.location.hash;
+  const browseMatch = /^#\/browse\/?$/i.test(currentHash);
 
   useEffect(() => {
-    if (!protected_) setAuthed(true);
-  }, [protected_]);
+    if (!isApiConfigured()) return; // initial state already covers this case
+    let cancelled = false;
+    fetchAuthStatus()
+      .then((res) => {
+        if (!cancelled) setProtectedState(!!res?.protected);
+      })
+      .catch(() => {
+        if (!cancelled) setProtectedState(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const effectiveAuthed = protectedState === false ? true : authed;
 
   useEffect(() => {
-    if (!protected_ || !authed) return;
+    if (!protectedState || !effectiveAuthed) return;
 
     const resetTimer = () => {
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
       inactivityTimerRef.current = setTimeout(() => {
-        clearAuthenticated();
+        clearSession();
         setAuthed(false);
       }, INACTIVITY_MS);
     };
@@ -2654,22 +1928,27 @@ function AppWithAuth({ hash = "" }) {
       events.forEach((ev) => document.removeEventListener(ev, resetTimer));
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     };
-  }, [protected_, authed]);
+  }, [protectedState, effectiveAuthed]);
 
-  if (protected_ && !authed) {
-    return <LoginPage onSuccess={() => setAuthed(true)} />;
+  // No-login public catalog, restricted the same way the client role is (General Inventory
+  // only, location hidden). Checked before the login gate so it never requires auth.
+  if (browseMatch) {
+    return <PropRoomInventoryApp isEditor={false} />;
   }
 
-  if (shareMatch) {
+  if (protectedState === null) {
     return (
-      <ShareView
-        listId={shareMatch[1]}
-        onBack={() => { window.location.hash = ""; }}
-      />
+      <div className="min-h-screen bg-cream-100 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-ink-400" />
+      </div>
     );
   }
 
-  const isEditor = !protected_ || getAuthenticatedRole() === "editor";
+  if (protectedState && !effectiveAuthed) {
+    return <LoginPage onSuccess={() => setAuthed(true)} />;
+  }
+
+  const isEditor = !protectedState || getStoredRole() === "editor";
   return <PropRoomInventoryApp isEditor={isEditor} />;
 }
 

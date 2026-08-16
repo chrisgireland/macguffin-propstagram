@@ -1,0 +1,19 @@
+name = "propstagram-api"
+main = "src/index.js"
+compatibility_date = "2026-08-13"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "propstagram"
+database_id = "73c9c3ae-031b-4344-9fdd-b9a6cd0a17da"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "propstagram-photos"
+
+[vars]
+# Public r2.dev URL for the propstagram-photos bucket (Settings -> enable "Public Development URL").
+PHOTOS_PUBLIC_BASE_URL = "https://pub-94a4f132f965463c8e0105648b85b42b.r2.dev"
+
+# Secrets (never put these here): wrangler secret put LOGINS
+#                                  wrangler secret put SESSION_TOKEN_SECRET

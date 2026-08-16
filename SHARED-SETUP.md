@@ -1,3 +1,8 @@
+> **Deprecated.** The app now runs on Cloudflare (D1 + R2 + a Worker API) instead of
+> Supabase — see [CLOUDFLARE-SETUP.md](CLOUDFLARE-SETUP.md). This file is kept for reference
+> during the migration/rollback window; it describes the old Supabase-based setup and no
+> longer matches `src/App.jsx`.
+
 # Making the app shared and deployable
 
 This guide gets you to a **public URL** and **shared storage** so everyone who opens the app sees the same props and can add new ones.
