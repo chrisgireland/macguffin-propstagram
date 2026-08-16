@@ -131,6 +131,13 @@ function LoginPage({ onSuccess }) {
             {submitting ? "Checking…" : "Log in"}
           </button>
         </form>
+        <button
+          type="button"
+          onClick={() => { window.location.hash = "#/browse"; }}
+          className="mt-4 w-full h-11 rounded-2xl border border-ink-200 bg-cream-50 text-ink-700 font-medium hover:bg-cream-200 focus:outline-none focus:ring-2 focus:ring-ink-400"
+        >
+          Continue as Guest
+        </button>
       </div>
     </div>
   );
