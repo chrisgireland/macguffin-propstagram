@@ -527,7 +527,7 @@ function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <h3 className="font-sans text-xl font-semibold text-ink-900 truncate">
+            <h3 className="font-sans text-xl font-semibold text-ink-900 line-clamp-2">
               {item.title}
             </h3>
             <p className="mt-2 text-sm leading-6 text-ink-600 line-clamp-2">
@@ -539,11 +539,12 @@ function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
             {onAddToList ? (
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className="rounded-xl text-ink-600 hover:text-ink-900 -mr-1 -mt-1"
+                variant="secondary"
+                size="icon"
+                className="h-8 w-8 rounded-full -mr-1 -mt-1"
                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); onAddToList(item); }}
                 aria-label="Add to list"
+                title="Add to list"
               >
                 <ListPlus className="h-4 w-4" />
               </Button>
@@ -595,7 +596,7 @@ function CategoryCard({ label, photo, isActive, onClick }) {
         "group relative flex w-full overflow-hidden rounded-2xl border-2 text-left transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2",
         isActive ? "border-ink-900 shadow-lg ring-2 ring-ink-900/20" : "border-ink-200 hover:border-ink-300"
       )}
-      style={{ aspectRatio: "4/3" }}
+      style={{ aspectRatio: "2/1" }}
     >
       <div
         className={cn(
@@ -605,14 +606,14 @@ function CategoryCard({ label, photo, isActive, onClick }) {
         style={photo ? { backgroundImage: `url(${photo})` } : undefined}
       />
       <div className="absolute inset-0 bg-gradient-to-t from-ink-900/85 via-ink-900/40 to-transparent" />
-      <div className="absolute inset-0 flex items-end p-4 sm:p-5">
-        <span className="font-sans text-lg font-semibold text-white drop-shadow-md transition-transform duration-300 group-hover:scale-110 sm:text-xl">
+      <div className="absolute inset-0 flex items-end p-3 sm:p-4">
+        <span className="font-sans text-base font-semibold text-white drop-shadow-md transition-transform duration-300 group-hover:scale-110 sm:text-lg">
           {label}
         </span>
       </div>
       {!photo && (
         <div className="absolute inset-0 flex items-center justify-center text-ink-400 opacity-60">
-          <Package2 className="h-14 w-14 sm:h-16 sm:w-16" strokeWidth={1.25} />
+          <Package2 className="h-8 w-8 sm:h-10 sm:w-10" strokeWidth={1.25} />
         </div>
       )}
     </button>
@@ -2475,14 +2476,14 @@ function PropRoomInventoryApp({ isEditor = true }) {
             </div>
           </div>
           <span className="font-sans text-sm text-ink-600">
-            {items.reduce((sum, item) => sum + (item.quantity || 1), 0)} props
+            {items.reduce((sum, item) => sum + (item.quantity || 1), 0)} total quantity
           </span>
         </div>
 
         {/* Results line: count */}
         <div className="mt-4">
           <p className="font-sans text-sm text-ink-600">
-            {filteredItems.length} {filteredItems.length === 1 ? "prop" : "props"}
+            {filteredItems.length} {filteredItems.length === 1 ? "prop" : "props"} shown
           </p>
         </div>
 
