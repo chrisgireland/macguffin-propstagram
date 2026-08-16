@@ -17,6 +17,9 @@ import {
   LayoutGrid,
   Table2,
   Tag,
+  ListPlus,
+  Link2,
+  List,
 } from "lucide-react";
 import {
   isApiConfigured,
@@ -37,7 +40,32 @@ import {
   getStoredRole,
   setSession,
   clearSession,
+  createList as apiCreateList,
+  fetchListsByIds,
+  fetchList,
+  renameList as apiRenameList,
+  deleteList as apiDeleteList,
+  addPropToList,
 } from "./lib/api.js";
+
+const SHARE_LIST_IDS_KEY = "propstagram_share_list_ids";
+const DEVICE_ID_KEY = "propstagram_device_id";
+
+/** A per-browser device ID (localStorage), used only to remember which lists this
+ *  device created/added to — not an account, not sent to the server, clearable. */
+function getDeviceId() {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+function getListIdsKey() {
+  return `${SHARE_LIST_IDS_KEY}_${getDeviceId()}`;
+}
 
 function getCroppedImg(image, crop) {
   if (!crop?.width || !crop?.height) return Promise.reject(new Error("No crop"));
@@ -473,7 +501,7 @@ function TagChips({ item }) {
   );
 }
 
-function ItemCard({ item, onClick, showLocation = true }) {
+function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
   return (
     <Card
       role="button"
@@ -508,6 +536,18 @@ function ItemCard({ item, onClick, showLocation = true }) {
           </div>
 
           <div className="flex flex-shrink-0 flex-col gap-2 items-end">
+            {onAddToList ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl text-ink-600 hover:text-ink-900 -mr-1 -mt-1"
+                onClick={(e) => { e.stopPropagation(); e.preventDefault(); onAddToList(item); }}
+                aria-label="Add to list"
+              >
+                <ListPlus className="h-4 w-4" />
+              </Button>
+            ) : null}
             <Badge>{item.category || "Prop"}</Badge>
             {item.job ? (
               <Badge className="bg-cream-200/80">{item.job}</Badge>
@@ -579,7 +619,7 @@ function CategoryCard({ label, photo, isActive, onClick }) {
   );
 }
 
-function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true, showLocation = true }) {
+function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canEdit = true, onAddToList, showLocation = true }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   useEffect(() => {
@@ -641,6 +681,18 @@ function PropDetailModal({ item, onClose, onDelete, onEdit, onOpenLightbox, canE
                   <Trash2 className="h-5 w-5" />
                 </Button>
               </>
+            )}
+            {onAddToList && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onAddToList(item)}
+                className="rounded-2xl text-ink-600 hover:text-ink-900"
+                aria-label="Add to list"
+                title="Add to list"
+              >
+                <ListPlus className="h-5 w-5" />
+              </Button>
             )}
             <Button
               variant="ghost"
@@ -827,6 +879,572 @@ function Lightbox({ imageUrl, onClose }) {
   );
 }
 
+/** Read-only view of a shared list, reachable via #/share/:id with no login required. */
+function ShareView({ listId, onBack }) {
+  const [list, setList] = useState(null);
+  const [props, setProps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [lightboxImage, setLightboxImage] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}#/share/${listId}` : "";
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!listId || !isApiConfigured()) {
+        if (cancelled) return;
+        setLoading(false);
+        if (!isApiConfigured()) setError("Shared lists are not configured.");
+        return;
+      }
+      try {
+        const data = await fetchList(listId);
+        if (cancelled) return;
+        setList(data);
+        setProps(data.props || []);
+      } catch {
+        if (!cancelled) setError("List not found.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [listId]);
+
+  const copyLink = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-cream-100 flex items-center justify-center p-6">
+        <Loader2 className="h-10 w-10 animate-spin text-ink-400" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="min-h-screen bg-cream-100 flex flex-col items-center justify-center p-6">
+        <p className="font-sans text-ink-700">{error}</p>
+        {onBack && (
+          <Button variant="outline" className="mt-4 rounded-2xl" onClick={onBack}>
+            Back to app
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-cream-100 text-ink-900">
+      <div className="mx-auto max-w-4xl px-4 py-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="font-sans text-2xl font-semibold text-ink-900">
+              {list?.name || "Shared list"}
+            </h1>
+            <p className="mt-1 text-sm text-ink-600">
+              {props.length} {props.length === 1 ? "prop" : "props"}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="primary" className="rounded-2xl" onClick={copyLink}>
+              <Link2 className="mr-2 h-4 w-4" />
+              {copied ? "Copied!" : "Copy link"}
+            </Button>
+            {onBack && (
+              <Button type="button" variant="outline" className="rounded-2xl" onClick={onBack}>
+                Back to app
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {props.map((item) => (
+            <ItemCard key={item.id} item={item} onClick={setSelectedItem} />
+          ))}
+        </div>
+        {props.length === 0 && (
+          <p className="mt-8 text-center font-sans text-ink-600">This list has no props yet.</p>
+        )}
+      </div>
+      {selectedItem && (
+        <PropDetailModal
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+          onDelete={() => {}}
+          onEdit={() => {}}
+          onOpenLightbox={setLightboxImage}
+          canEdit={false}
+        />
+      )}
+      <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
+    </div>
+  );
+}
+
+/** Create a new list (from this prop) or add this prop to one already created on this device. */
+function AddToListModal({ open, item, onClose }) {
+  const [newListName, setNewListName] = useState("");
+  const [myLists, setMyLists] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createdListId, setCreatedListId] = useState(null);
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [addingId, setAddingId] = useState(null);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!open || !item) return;
+    let cancelled = false;
+    (async () => {
+      setCreatedListId(null);
+      setShareUrl("");
+      setNewListName("");
+      setMessage("");
+      if (!isApiConfigured()) return;
+      const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
+      if (!ids.length) {
+        if (!cancelled) setMyLists([]);
+        return;
+      }
+      if (!cancelled) setLoading(true);
+      try {
+        const data = await fetchListsByIds(ids);
+        if (!cancelled) setMyLists(data || []);
+      } catch {
+        // keep list empty on failure
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on item id, not the whole object (which gets a new reference on every props refetch)
+  }, [open, item?.id]);
+
+  const rememberListId = (listId) => {
+    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
+    if (!ids.includes(listId)) {
+      localStorage.setItem(getListIdsKey(), JSON.stringify([...ids, listId]));
+    }
+  };
+
+  const createList = async () => {
+    if (!item || !isApiConfigured()) return;
+    setCreating(true);
+    try {
+      const list = await apiCreateList(newListName.trim());
+      await addPropToList(list.id, item.id);
+      rememberListId(list.id);
+      setCreatedListId(list.id);
+      setShareUrl(`${window.location.origin}${window.location.pathname}#/share/${list.id}`);
+      setMyLists((prev) => [...prev, { id: list.id, name: list.name || "Untitled list", propTitles: [item.title] }]);
+    } catch {
+      setMessage("Could not create list. Try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const addToList = async (listId) => {
+    if (!item || !isApiConfigured()) return;
+    setAddingId(listId);
+    try {
+      await addPropToList(listId, item.id);
+      setMessage("Added to list.");
+    } catch {
+      setMessage("Could not add to list.");
+    } finally {
+      setAddingId(null);
+    }
+  };
+
+  const copyShareLink = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  if (!open) return null;
+  return (
+    <Modal open={true} onClose={onClose} title="Add to list">
+      <div className="space-y-6">
+        {message && (
+          <p className={cn("text-sm", message.startsWith("Could") ? "text-red-600" : "text-ink-700")}>
+            {message}
+          </p>
+        )}
+        {!createdListId ? (
+          <>
+            <div>
+              <Label className="block mb-2">Create new list</Label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  placeholder="List name (optional)"
+                  className="h-11 flex-1 rounded-2xl border border-ink-200 bg-cream-50 px-4 font-sans text-ink-900 placeholder:text-ink-500 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
+                />
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="rounded-2xl shrink-0"
+                  onClick={createList}
+                  disabled={creating}
+                >
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create"}
+                </Button>
+              </div>
+            </div>
+            {loading ? (
+              <p className="text-sm text-ink-600">Loading your lists…</p>
+            ) : myLists.length > 0 ? (
+              <div>
+                <Label className="block mb-2">Add to existing list</Label>
+                <ul className="space-y-2">
+                  {myLists.map((list) => (
+                    <li key={list.id} className="flex items-center justify-between rounded-2xl border border-ink-200 bg-cream-50 px-4 py-2">
+                      <span className="font-sans text-ink-900">{list.name || "Untitled list"}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="default"
+                        className="rounded-xl"
+                        onClick={() => addToList(list.id)}
+                        disabled={addingId === list.id}
+                      >
+                        {addingId === list.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="rounded-2xl border border-ink-200 bg-cream-100 p-4">
+            <p className="font-sans text-sm font-medium text-ink-800">List created. Share this link:</p>
+            <div className="mt-2 flex gap-2">
+              <input
+                type="text"
+                readOnly
+                value={shareUrl}
+                className="flex-1 rounded-xl border border-ink-200 bg-cream-50 px-3 py-2 font-mono text-sm text-ink-700"
+              />
+              <Button type="button" variant="primary" className="rounded-xl shrink-0" onClick={copyShareLink}>
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** Lists this device has created/added to (from localStorage) — rename, delete, share, or forget. */
+function MyListsModal({ open, onClose }) {
+  const [lists, setLists] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+  const [editingListId, setEditingListId] = useState(null);
+  const [editingName, setEditingName] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const doFetchLists = useCallback(async () => {
+    if (!isApiConfigured()) return;
+    const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
+    if (!ids.length) {
+      setLists([]);
+      return;
+    }
+    try {
+      const data = await fetchListsByIds(ids);
+      setLists(
+        (data || []).map((list) => ({
+          id: list.id,
+          name: list.name || "Untitled list",
+          propTitles: list.propTitles || [],
+        }))
+      );
+    } catch {
+      setLists([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      setLists([]);
+      setEditingListId(null);
+      setConfirmDeleteId(null);
+      setConfirmClear(false);
+      if (!isApiConfigured()) return;
+      const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
+      if (!ids.length) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      if (!cancelled) setLoading(true);
+      await doFetchLists();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [open, doFetchLists]);
+
+  const copyLink = (listId) => {
+    const url = `${window.location.origin}${window.location.pathname}#/share/${listId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(listId);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
+
+  const startRename = (list, e) => {
+    e.stopPropagation();
+    setEditingListId(list.id);
+    setEditingName(list.name);
+  };
+
+  const saveRename = async (e) => {
+    e?.stopPropagation();
+    if (!editingListId) return;
+    const name = editingName.trim() || "Untitled list";
+    try {
+      await apiRenameList(editingListId, name);
+      setLists((prev) => prev.map((l) => (l.id === editingListId ? { ...l, name } : l)));
+    } catch {
+      // leave list unchanged on failure
+    }
+    setEditingListId(null);
+  };
+
+  const cancelRename = (e) => {
+    e?.stopPropagation();
+    setEditingListId(null);
+  };
+
+  const confirmDelete = (listId, e) => {
+    e?.stopPropagation();
+    setConfirmDeleteId(listId);
+  };
+
+  const cancelDelete = (e) => {
+    e?.stopPropagation();
+    setConfirmDeleteId(null);
+  };
+
+  const removeList = async (listId, e) => {
+    e?.stopPropagation();
+    setDeletingId(listId);
+    try {
+      await apiDeleteList(listId);
+      const ids = JSON.parse(localStorage.getItem(getListIdsKey()) || "[]");
+      localStorage.setItem(getListIdsKey(), JSON.stringify(ids.filter((id) => id !== listId)));
+      setLists((prev) => prev.filter((l) => l.id !== listId));
+    } catch {
+      // leave list as-is on failure
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
+    }
+  };
+
+  const clearMyLists = () => {
+    localStorage.removeItem(getListIdsKey());
+    setLists([]);
+    setConfirmClear(false);
+  };
+
+  if (!open) return null;
+  return (
+    <Modal open={true} onClose={onClose} title="Your lists">
+      <div className="space-y-4">
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-ink-400" />
+          </div>
+        ) : lists.length === 0 ? (
+          <p className="font-sans text-ink-600 py-4">
+            You haven&apos;t created any lists yet. Use &quot;Add to list&quot; on a prop card or in the prop detail view to create one.
+          </p>
+        ) : (
+          <>
+            <ul className="space-y-4">
+              {lists.map((list) => (
+                <li
+                  key={list.id}
+                  role={editingListId === list.id ? undefined : "button"}
+                  tabIndex={editingListId === list.id ? undefined : 0}
+                  onClick={
+                    editingListId === list.id
+                      ? undefined
+                      : () => {
+                          window.location.hash = `#/share/${list.id}`;
+                          onClose();
+                        }
+                  }
+                  onKeyDown={
+                    editingListId === list.id
+                      ? undefined
+                      : (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            window.location.hash = `#/share/${list.id}`;
+                            onClose();
+                          }
+                        }
+                  }
+                  className={cn(
+                    "rounded-2xl border border-ink-200 bg-cream-50 p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2",
+                    editingListId !== list.id && "cursor-pointer hover:bg-cream-100 hover:border-ink-300"
+                  )}
+                >
+                  {confirmDeleteId === list.id ? (
+                    <div className="flex flex-wrap items-center gap-2 py-1" onClick={(e) => e.stopPropagation()}>
+                      <span className="font-sans text-sm text-ink-700">Delete this list?</span>
+                      <Button type="button" variant="outline" size="default" className="rounded-xl" onClick={(e) => removeList(list.id, e)}>
+                        Delete
+                      </Button>
+                      <Button type="button" variant="ghost" size="default" className="rounded-xl" onClick={cancelDelete}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : editingListId === list.id ? (
+                    <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && saveRename(e)}
+                        className="h-9 flex-1 min-w-[120px] rounded-xl border border-ink-200 bg-cream-50 px-3 font-sans text-ink-900 focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none"
+                        placeholder="List name"
+                        autoFocus
+                      />
+                      <Button type="button" variant="primary" size="default" className="rounded-xl shrink-0" onClick={saveRename}>
+                        Save
+                      </Button>
+                      <Button type="button" variant="ghost" size="default" className="rounded-xl shrink-0" onClick={cancelRename}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-sans font-semibold text-ink-900">
+                          {list.name}
+                        </h3>
+                        <p className="mt-1 text-sm text-ink-600">
+                          {list.propTitles.length} {list.propTitles.length === 1 ? "prop" : "props"}
+                        </p>
+                        {list.propTitles.length > 0 && (
+                          <ul className="mt-2 space-y-1 text-sm text-ink-700">
+                            {list.propTitles.map((title, i) => (
+                              <li key={i} className="truncate">• {title}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="rounded-xl text-ink-600 hover:text-ink-900"
+                          onClick={(e) => startRename(list, e)}
+                          aria-label="Rename list"
+                          title="Rename list"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={(e) => confirmDelete(list.id, e)}
+                          disabled={deletingId === list.id}
+                          aria-label="Delete list"
+                          title="Delete list"
+                        >
+                          {deletingId === list.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="default"
+                          className="rounded-xl shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyLink(list.id);
+                          }}
+                          aria-label="Copy share link"
+                        >
+                          {copiedId === list.id ? (
+                            "Copied!"
+                          ) : (
+                            <>
+                              <Link2 className="mr-1.5 h-4 w-4" />
+                              Share
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="pt-2 border-t border-ink-200">
+              {confirmClear ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-sans text-sm text-ink-700">
+                    Forget these lists on this device? The lists themselves aren&apos;t deleted.
+                  </span>
+                  <Button type="button" variant="outline" size="default" className="rounded-xl" onClick={clearMyLists}>
+                    Forget
+                  </Button>
+                  <Button type="button" variant="ghost" size="default" className="rounded-xl" onClick={() => setConfirmClear(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="default"
+                  className="rounded-xl text-ink-600 hover:text-ink-900"
+                  onClick={() => setConfirmClear(true)}
+                >
+                  Forget my lists on this device
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function PropsTable({ items, onSelect, showLocation = true }) {
   return (
     <div className="mt-6 overflow-x-auto rounded-2xl border border-ink-200 bg-cream-50">
@@ -888,6 +1506,8 @@ function PropRoomInventoryApp({ isEditor = true }) {
   const [lightboxImage, setLightboxImage] = useState(null);
   const [photoToCrop, setPhotoToCrop] = useState(null);
   const [addAsAppOpen, setAddAsAppOpen] = useState(false);
+  const [addToListItem, setAddToListItem] = useState(null);
+  const [listsModalOpen, setListsModalOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
 
   const cameraInputRef = useRef(null);
@@ -1382,6 +2002,18 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 Add as app
               </Button>
             )}
+            {isApiConfigured() && (
+              <Button
+                type="button"
+                onClick={() => setListsModalOpen(true)}
+                variant="outline"
+                size="default"
+                className="rounded-2xl shrink-0"
+              >
+                <List className="mr-2 h-4 w-4" />
+                Lists
+              </Button>
+            )}
             {isEditor && (
               <Button
                 onClick={openAddForm}
@@ -1403,6 +2035,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
           onEdit={openEditForm}
           onOpenLightbox={setLightboxImage}
           canEdit={isEditor}
+          onAddToList={isApiConfigured() ? (it) => setAddToListItem(it) : undefined}
           showLocation={isEditor}
         />
 
@@ -1410,6 +2043,15 @@ function PropRoomInventoryApp({ isEditor = true }) {
           src={photoToCrop}
           onComplete={handleCropComplete}
           onCancel={handleCropCancel}
+        />
+        <AddToListModal
+          open={!!addToListItem}
+          item={addToListItem}
+          onClose={() => setAddToListItem(null)}
+        />
+        <MyListsModal
+          open={listsModalOpen}
+          onClose={() => setListsModalOpen(false)}
         />
         <AddAsAppModal open={addAsAppOpen} onClose={() => setAddAsAppOpen(false)} />
         <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
@@ -1855,6 +2497,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
                   key={item.id}
                   item={item}
                   onClick={setSelectedItem}
+                  onAddToList={isApiConfigured() ? (it) => setAddToListItem(it) : undefined}
                   showLocation={isEditor}
                 />
               ))}
@@ -1901,6 +2544,7 @@ function AppWithAuth({ hash = "" }) {
   const inactivityTimerRef = useRef(null);
   const currentHash = hash || window.location.hash;
   const browseMatch = /^#\/browse\/?$/i.test(currentHash);
+  const shareMatch = currentHash.match(/^#\/share\/([a-f0-9-]+)$/i);
 
   useEffect(() => {
     if (!isApiConfigured()) return; // initial state already covers this case
@@ -1936,6 +2580,12 @@ function AppWithAuth({ hash = "" }) {
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     };
   }, [protectedState, effectiveAuthed]);
+
+  // Shared list view: view-only, no editing, no login required. Checked before the login
+  // gate so a link recipient never has to authenticate to see a curated list.
+  if (shareMatch) {
+    return <ShareView listId={shareMatch[1]} onBack={() => { window.location.hash = "#/browse"; }} />;
+  }
 
   // No-login public catalog, restricted the same way the client role is (General Inventory
   // only, location hidden). Checked before the login gate so it never requires auth.

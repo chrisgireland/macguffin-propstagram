@@ -144,3 +144,30 @@ export async function uploadPhoto(file) {
   const data = await request("/api/photos", { method: "POST", body: formData, auth: true, isForm: true });
   return data.url;
 }
+
+// Shared lists — open routes, no auth: guests can create/add to lists without logging in.
+export async function createList(name) {
+  return request("/api/lists", { method: "POST", body: { name } });
+}
+
+export async function fetchListsByIds(ids) {
+  if (!ids?.length) return [];
+  return request(`/api/lists?ids=${encodeURIComponent(ids.join(","))}`);
+}
+
+export async function fetchList(id) {
+  const data = await request(`/api/lists/${id}`);
+  return { ...data, props: (data.props || []).map(parseProp) };
+}
+
+export async function renameList(id, name) {
+  return request(`/api/lists/${id}`, { method: "PATCH", body: { name } });
+}
+
+export async function deleteList(id) {
+  return request(`/api/lists/${id}`, { method: "DELETE" });
+}
+
+export async function addPropToList(listId, propId) {
+  return request(`/api/lists/${listId}/items`, { method: "POST", body: { prop_id: propId } });
+}
