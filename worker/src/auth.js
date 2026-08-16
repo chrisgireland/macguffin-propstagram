@@ -86,3 +86,9 @@ export async function requireEditor(request, env) {
   if (!payload || payload.role !== "editor") return null;
   return payload;
 }
+
+/** Returns 'editor' | 'client' | null (no/invalid/expired token — treated as anonymous/guest). */
+export async function getRequestRole(request, env) {
+  const payload = await verifySessionToken(env, getBearerToken(request));
+  return payload?.role === "editor" || payload?.role === "client" ? payload.role : null;
+}

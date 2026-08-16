@@ -1,8 +1,9 @@
-import { parseLogins, hashPassword, createSessionToken, requireEditor } from "./auth.js";
+import { parseLogins, hashPassword, createSessionToken, requireEditor, getRequestRole } from "./auth.js";
 import { withCors, corsPreflight } from "./cors.js";
 
 const CONDITIONS = ["Excellent", "Good", "Needs Repair", "Fragile"];
 const STATUSES = ["In Stock", "Checked Out", "In Repair"];
+const GENERAL_INVENTORY_JOB = "General Inventory";
 
 function json(data, status = 200) {
   return withCors(
@@ -103,7 +104,17 @@ export default {
       }
 
       if (path === "/api/props" && request.method === "GET") {
-        const { results } = await env.DB.prepare("SELECT * FROM props ORDER BY created_at DESC").all();
+        const role = await getRequestRole(request, env);
+        if (role === "editor") {
+          const { results } = await env.DB.prepare("SELECT * FROM props ORDER BY created_at DESC").all();
+          return json(results);
+        }
+        // No token, or a client-role token: restricted to General Inventory only, enforced
+        // server-side (not just hidden in the UI) — same restriction the client role has
+        // always had, now actually unable to be bypassed by reading the API directly.
+        const { results } = await env.DB.prepare(
+          "SELECT * FROM props WHERE job = ? ORDER BY created_at DESC"
+        ).bind(GENERAL_INVENTORY_JOB).all();
         return json(results);
       }
 

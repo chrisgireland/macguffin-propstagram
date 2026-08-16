@@ -89,7 +89,9 @@ export async function login(username, password) {
 }
 
 export async function fetchProps() {
-  const rows = await request("/api/props");
+  // auth:true attaches a token when one exists (editor session) but doesn't require
+  // one — the Worker decides what to return based on whatever role, if any, it sees.
+  const rows = await request("/api/props", { auth: true });
   return (rows || []).map(parseProp);
 }
 
