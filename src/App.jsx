@@ -40,6 +40,7 @@ import {
   getStoredRole,
   setSession,
   clearSession,
+  SESSION_EXPIRED_EVENT,
   createList as apiCreateList,
   fetchListsByIds,
   fetchList,
@@ -86,10 +87,10 @@ function getCroppedImg(image, crop) {
   });
 }
 
-function LoginPage({ onSuccess }) {
+function LoginPage({ onSuccess, sessionExpired }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(sessionExpired ? "Your session expired — please log in again." : "");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -2541,8 +2542,21 @@ const INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes
 
 function AppWithAuth({ hash = "" }) {
   const [authed, setAuthed] = useState(() => hasSession());
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [protectedState, setProtectedState] = useState(isApiConfigured() ? null : false);
   const inactivityTimerRef = useRef(null);
+
+  // The API told us our token died server-side (expiry, clock skew, stale tab) even
+  // though the UI still thought we were logged in — drop back to the login screen
+  // instead of leaving the user stuck looking at a raw "Unauthorized" error.
+  useEffect(() => {
+    const onExpired = () => {
+      setSessionExpired(true);
+      setAuthed(false);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
   const currentHash = hash || window.location.hash;
   const browseMatch = /^#\/browse\/?$/i.test(currentHash);
   const shareMatch = currentHash.match(/^#\/share\/([a-f0-9-]+)$/i);
@@ -2603,7 +2617,15 @@ function AppWithAuth({ hash = "" }) {
   }
 
   if (protectedState && !effectiveAuthed) {
-    return <LoginPage onSuccess={() => setAuthed(true)} />;
+    return (
+      <LoginPage
+        sessionExpired={sessionExpired}
+        onSuccess={() => {
+          setSessionExpired(false);
+          setAuthed(true);
+        }}
+      />
+    );
   }
 
   const isEditor = !protectedState || getStoredRole() === "editor";

@@ -30,6 +30,12 @@ export function hasSession() {
   return !!getToken();
 }
 
+/** Fired when an authenticated request comes back 401 — the session died server-side
+ *  (expiry, clock skew, stale tab) even though the UI still thought it was logged in.
+ *  AppWithAuth listens for this to clear the stale state and bounce back to login,
+ *  instead of leaving the user staring at a raw "Unauthorized" error. */
+export const SESSION_EXPIRED_EVENT = "propstagram:session-expired";
+
 async function request(path, { method = "GET", body, auth = false, isForm = false } = {}) {
   const headers = {};
   if (!isForm) headers["Content-Type"] = "application/json";
@@ -42,7 +48,20 @@ async function request(path, { method = "GET", body, auth = false, isForm = fals
     headers,
     body: isForm ? body : body != null ? JSON.stringify(body) : undefined,
   });
+
+  // The worker slides an active session's expiry forward on every request that
+  // carried a still-valid token — pick up the renewed token so the stored session
+  // doesn't fall behind and expire out from under a continuously active user.
+  if (auth) {
+    const renewedToken = res.headers.get("X-Session-Token");
+    if (renewedToken) setSession(renewedToken, getStoredRole());
+  }
+
   if (!res.ok) {
+    if (auth && res.status === 401) {
+      clearSession();
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    }
     let message = `Request failed (${res.status})`;
     try {
       const data = await res.json();

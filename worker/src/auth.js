@@ -92,3 +92,16 @@ export async function getRequestRole(request, env) {
   const payload = await verifySessionToken(env, getBearerToken(request));
   return payload?.role === "editor" || payload?.role === "client" ? payload.role : null;
 }
+
+/**
+ * Slides the session forward: if the request carries a still-valid token, mints a
+ * fresh one with a new SESSION_TTL_MS window. Called on every request regardless of
+ * route, so a continuously active user's token never hits the fixed TTL — that TTL
+ * is only meant as a backstop for genuinely idle sessions (the frontend already logs
+ * those out after 10 minutes of inactivity; see INACTIVITY_MS in App.jsx).
+ */
+export async function renewToken(request, env) {
+  const payload = await verifySessionToken(env, getBearerToken(request));
+  if (!payload) return null;
+  return createSessionToken(env, { username: payload.username, role: payload.role });
+}

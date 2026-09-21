@@ -4,6 +4,9 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  // Lets the frontend read the sliding-session renewal header (see auth.js) off a
+  // cross-origin response — without this, fetch() silently hides non-simple headers.
+  "Access-Control-Expose-Headers": "X-Session-Token",
 };
 
 export function withCors(response) {
