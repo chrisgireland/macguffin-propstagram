@@ -4,6 +4,9 @@ import { withCors, corsPreflight } from "./cors.js";
 const CONDITIONS = ["Excellent", "Good", "Needs Repair", "Fragile"];
 const STATUSES = ["In Stock", "Checked Out", "In Repair"];
 const GENERAL_INVENTORY_JOB = "General Inventory";
+// Reserved section (see JOB_SPECIFIC_SECTION in App.jsx) — editor-only, excluded from
+// what non-editor roles can fetch, not just hidden in the UI.
+const JOB_SPECIFIC_SECTION = "Job Specific";
 
 function json(data, status = 200) {
   return withCors(
@@ -103,12 +106,12 @@ async function route(request, env, url, path) {
         const { results } = await env.DB.prepare("SELECT * FROM props ORDER BY created_at DESC").all();
         return json(results);
       }
-      // No token, or a client-role token: restricted to General Inventory only, enforced
-      // server-side (not just hidden in the UI) — same restriction the client role has
-      // always had, now actually unable to be bypassed by reading the API directly.
+      // No token, or a client-role token: restricted to General Inventory only, and never
+      // the Job Specific section — enforced server-side (not just hidden in the UI), so
+      // neither restriction can be bypassed by reading the API directly.
       const { results } = await env.DB.prepare(
-        "SELECT * FROM props WHERE job = ? ORDER BY created_at DESC"
-      ).bind(GENERAL_INVENTORY_JOB).all();
+        "SELECT * FROM props WHERE job = ? AND (category IS NULL OR LOWER(category) != LOWER(?)) ORDER BY created_at DESC"
+      ).bind(GENERAL_INVENTORY_JOB, JOB_SPECIFIC_SECTION).all();
       return json(results);
     }
 

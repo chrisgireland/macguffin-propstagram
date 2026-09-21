@@ -174,8 +174,14 @@ function LoginPage({ onSuccess, sessionExpired }) {
 
 const starterItems = [];
 
+// Reserved section: editor-only, used to tag props that belong to one specific job
+// rather than the general shape-based sections. Never shown to guests/clients, and
+// injected client-side rather than stored in the sections table (like "All Props").
+const JOB_SPECIFIC_SECTION = "Job Specific";
+
 const sectionTitles = [
   "All Props",
+  JOB_SPECIFIC_SECTION,
   "White Plateware",
   "Earthtone Plateware",
   "Colored Plateware",
@@ -1553,7 +1559,11 @@ function PropRoomInventoryApp({ isEditor = true }) {
     if (!isApiConfigured()) return;
     try {
       const names = await apiFetchSections();
-      setSections(["All Props", ...(names.length ? names : sectionTitles.filter((s) => s !== "All Props"))]);
+      const base = names.length
+        ? names
+        : sectionTitles.filter((s) => s !== "All Props" && s !== JOB_SPECIFIC_SECTION);
+      const withoutReserved = base.filter((s) => s.toLowerCase() !== JOB_SPECIFIC_SECTION.toLowerCase());
+      setSections(["All Props", JOB_SPECIFIC_SECTION, ...withoutReserved]);
     } catch {
       // keep existing sections on failure
     }
@@ -1659,11 +1669,16 @@ function PropRoomInventoryApp({ isEditor = true }) {
 
   const GENERAL_INVENTORY = "General Inventory";
 
+  // Guests/clients only ever see General Inventory props, and never anything tagged
+  // Job Specific — that section is editor-only, both as a browsing tab and as data.
+  const isGuestVisible = (item) =>
+    (item.job || "").trim() === GENERAL_INVENTORY &&
+    (item.category || "").trim().toLowerCase() !== JOB_SPECIFIC_SECTION.toLowerCase();
+
   const filteredItems = useMemo(() => {
     const q = search.toLowerCase().trim();
     const dimQuery = parseDimsFromQuery(q);
-    const jobFiltered =
-      isEditor ? items : items.filter((item) => (item.job || "").trim() === GENERAL_INVENTORY);
+    const jobFiltered = isEditor ? items : items.filter(isGuestVisible);
 
     const filtered = jobFiltered.filter((item) => {
       const matchesSection =
@@ -1762,14 +1777,14 @@ function PropRoomInventoryApp({ isEditor = true }) {
   }, [items, search, activeSection, isEditor, sortMode]);
 
   const categoryThumbnails = useMemo(() => {
-    const jobFiltered =
-      isEditor ? items : items.filter((item) => (item.job || "").trim() === GENERAL_INVENTORY);
+    const jobFiltered = isEditor ? items : items.filter(isGuestVisible);
+    const visibleSections = isEditor ? sections : sections.filter((s) => s !== JOB_SPECIFIC_SECTION);
     const byCreated = (a, b) => {
       const da = a.created_at ? new Date(a.created_at) : new Date(0);
       const db = b.created_at ? new Date(b.created_at) : new Date(0);
       return db - da;
     };
-    return sections.map((sectionName) => {
+    return visibleSections.map((sectionName) => {
       const inSection =
         sectionName === "All Props"
           ? jobFiltered
