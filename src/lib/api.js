@@ -30,18 +30,23 @@ export function hasSession() {
   return !!getToken();
 }
 
-/** Fired when an authenticated request comes back 401 — the session died server-side
- *  (expiry, clock skew, stale tab) even though the UI still thought it was logged in.
- *  AppWithAuth listens for this to clear the stale state and bounce back to login,
- *  instead of leaving the user staring at a raw "Unauthorized" error. */
+/** Fired when a request that carried a session token comes back without the server
+ *  recognizing that token as still valid — the session died (expiry, clock skew, a
+ *  tab left open across a sleep/idle gap) even though the UI still thought it was
+ *  logged in. Some routes (e.g. GET /api/props) don't 401 on a bad token, they just
+ *  silently downgrade to guest-level data — without this, the UI would keep showing
+ *  editor chrome while quietly rendering a filtered-down, guest's-eye view of the
+ *  data. AppWithAuth listens for this to clear the stale state and bounce back to
+ *  login instead of leaving that mismatch invisible. */
 export const SESSION_EXPIRED_EVENT = "propstagram:session-expired";
 
 async function request(path, { method = "GET", body, auth = false, isForm = false } = {}) {
   const headers = {};
   if (!isForm) headers["Content-Type"] = "application/json";
+  let sentToken = "";
   if (auth) {
-    const token = getToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    sentToken = getToken();
+    if (sentToken) headers["Authorization"] = `Bearer ${sentToken}`;
   }
   const res = await fetch(`${API_URL}${path}`, {
     method,
@@ -49,19 +54,21 @@ async function request(path, { method = "GET", body, auth = false, isForm = fals
     body: isForm ? body : body != null ? JSON.stringify(body) : undefined,
   });
 
-  // The worker slides an active session's expiry forward on every request that
-  // carried a still-valid token — pick up the renewed token so the stored session
-  // doesn't fall behind and expire out from under a continuously active user.
-  if (auth) {
+  // The worker renews and returns a still-valid token on every request that carried
+  // one (sliding its expiry forward), regardless of that route's outcome. So a sent
+  // token coming back without a renewal means the server didn't recognize it as
+  // valid — the one reliable signal that our session actually died server-side.
+  if (sentToken) {
     const renewedToken = res.headers.get("X-Session-Token");
-    if (renewedToken) setSession(renewedToken, getStoredRole());
-  }
-
-  if (!res.ok) {
-    if (auth && res.status === 401) {
+    if (renewedToken) {
+      setSession(renewedToken, getStoredRole());
+    } else {
       clearSession();
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     }
+  }
+
+  if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
       const data = await res.json();
