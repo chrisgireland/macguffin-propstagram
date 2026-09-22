@@ -1677,6 +1677,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
 
   const filteredItems = useMemo(() => {
     const q = search.toLowerCase().trim();
+    const queryTerms = q.split(/\s+/).filter(Boolean);
     const dimQuery = parseDimsFromQuery(q);
     const jobFiltered = isEditor ? items : items.filter(isGuestVisible);
 
@@ -1698,32 +1699,38 @@ function PropRoomInventoryApp({ isEditor = true }) {
           ((Math.abs(len - dimQuery.a) < 1e-6 && Math.abs(wid - dimQuery.b) < 1e-6) ||
             (Math.abs(len - dimQuery.b) < 1e-6 && Math.abs(wid - dimQuery.a) < 1e-6)));
 
-      const matchesQuery =
-        !q ||
-        [
-          item.title,
-          item.description,
-          item.location,
-          item.category,
-          item.job,
-          item.code,
-          item.length,
-          item.width,
-          dimText,
-          dimTextAlt,
-          dimTextArea,
-          item.era_style,
-          item.condition,
-          item.status,
-          ...(item.color || []),
-          ...(item.tags || []),
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(q);
+      const searchableText = [
+        item.title,
+        item.description,
+        item.location,
+        item.category,
+        item.job,
+        item.code,
+        item.length,
+        item.width,
+        dimText,
+        dimTextAlt,
+        dimTextArea,
+        item.era_style,
+        item.condition,
+        item.status,
+        ...(item.color || []),
+        ...(item.tags || []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-      return matchesSection && matchesQuery && matchesDimPair;
+      // Match each search word independently (AND across words) rather than requiring
+      // the whole typed phrase as one contiguous substring — "applebees bowl" should
+      // find "Applebees sandblasted shallow bowl" even though the words aren't adjacent.
+      const matchesQuery = queryTerms.every((term) => searchableText.includes(term));
+
+      // A dimension-shaped query (e.g. "24x18") is numeric intent, not text to find
+      // verbatim — dimensions are stored/displayed as "24 x 18", so it would never
+      // satisfy matchesQuery. Let a numeric dimension match stand in for it (this is
+      // also what lets a swapped order like "18x24" still find a 24x18 item).
+      return matchesSection && matchesDimPair && (matchesQuery || Boolean(dimQuery));
     });
 
     const getDate = (x) => (x?.created_at ? new Date(x.created_at) : new Date(0));
