@@ -12,7 +12,7 @@ export function parseLogins(env) {
     const username = part.slice(0, firstColon).trim().toLowerCase();
     const hash = part.slice(firstColon + 1, lastColon).trim().toLowerCase();
     const role = part.slice(lastColon + 1).trim().toLowerCase();
-    if (username && hash && (role === "client" || role === "editor")) {
+    if (username && hash && (role === "client" || role === "editor" || role === "viewer")) {
       entries.push({ username, passwordHash: hash, role });
     }
   }
@@ -87,10 +87,10 @@ export async function requireEditor(request, env) {
   return payload;
 }
 
-/** Returns 'editor' | 'client' | null (no/invalid/expired token — treated as anonymous/guest). */
+/** Returns 'editor' | 'viewer' | 'client' | null (no/invalid/expired token — treated as anonymous/guest). */
 export async function getRequestRole(request, env) {
   const payload = await verifySessionToken(env, getBearerToken(request));
-  return payload?.role === "editor" || payload?.role === "client" ? payload.role : null;
+  return ["editor", "viewer", "client"].includes(payload?.role) ? payload.role : null;
 }
 
 /**

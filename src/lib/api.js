@@ -13,12 +13,12 @@ export function getToken() {
 
 export function getStoredRole() {
   const role = sessionStorage.getItem(ROLE_KEY);
-  return role === "client" ? "client" : "editor";
+  return role === "client" || role === "viewer" ? role : "editor";
 }
 
 export function setSession(token, role) {
   sessionStorage.setItem(TOKEN_KEY, token);
-  sessionStorage.setItem(ROLE_KEY, role === "client" ? "client" : "editor");
+  sessionStorage.setItem(ROLE_KEY, role === "client" || role === "viewer" ? role : "editor");
 }
 
 export function clearSession() {

@@ -1499,7 +1499,9 @@ function PropsTable({ items, onSelect, showLocation = true }) {
   );
 }
 
-function PropRoomInventoryApp({ isEditor = true }) {
+// isEditor = sees everything (all jobs, Job Specific, locations); canEdit = may add/edit/delete.
+// They differ for the read-only "viewer" role.
+function PropRoomInventoryApp({ isEditor = true, canEdit = isEditor }) {
   const [items, setItems] = useState(starterItems);
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState("newest");
@@ -2038,7 +2040,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
                 Lists
               </Button>
             )}
-            {isEditor && (
+            {canEdit && (
               <Button
                 onClick={openAddForm}
                 variant="primary"
@@ -2058,7 +2060,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
           onDelete={deleteItem}
           onEdit={openEditForm}
           onOpenLightbox={setLightboxImage}
-          canEdit={isEditor}
+          canEdit={canEdit}
           onAddToList={isApiConfigured() ? (it) => setAddToListItem(it) : undefined}
           showLocation={isEditor}
         />
@@ -2539,7 +2541,7 @@ function PropRoomInventoryApp({ isEditor = true }) {
               <p className="mt-2 font-sans text-sm text-ink-600">
                 Try another search or switch tabs.
               </p>
-              {isEditor && (
+              {canEdit && (
                 <Button
                   type="button"
                   variant="primary"
@@ -2650,8 +2652,8 @@ function AppWithAuth({ hash = "" }) {
     );
   }
 
-  const isEditor = !protectedState || getStoredRole() === "editor";
-  return <PropRoomInventoryApp isEditor={isEditor} />;
+  const role = protectedState ? getStoredRole() : "editor";
+  return <PropRoomInventoryApp isEditor={role !== "client"} canEdit={role === "editor"} />;
 }
 
 function App() {

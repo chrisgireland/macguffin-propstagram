@@ -66,6 +66,10 @@ npx wrangler secret put LOGINS
 # paste the value, e.g.: editor:abc123...:editor,client:def456...:client
 ```
 
+Roles: `editor` (full access), `viewer` (sees all props, including Job Specific and
+locations, but read-only), and `client` (General Inventory only, read-only). To add a viewer,
+append e.g. `,viewer:<sha256 of password>:viewer` to the `LOGINS` value and re-run the command.
+
 If you only ever used `VITE_PASSWORD_HASH` (single password), convert it to the `LOGINS`
 format first: `editor:<that hash>:editor`.
 

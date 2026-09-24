@@ -102,7 +102,8 @@ async function route(request, env, url, path) {
 
     if (path === "/api/props" && request.method === "GET") {
       const role = await getRequestRole(request, env);
-      if (role === "editor") {
+      // "viewer" reads everything an editor does; write routes still use requireEditor.
+      if (role === "editor" || role === "viewer") {
         const { results } = await env.DB.prepare("SELECT * FROM props ORDER BY created_at DESC").all();
         return json(results);
       }
