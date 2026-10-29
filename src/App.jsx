@@ -68,22 +68,29 @@ function getListIdsKey() {
   return `${SHARE_LIST_IDS_KEY}_${getDeviceId()}`;
 }
 
+const MAX_PHOTO_EDGE = 1600;
+
 function getCroppedImg(image, crop) {
   if (!crop?.width || !crop?.height) return Promise.reject(new Error("No crop"));
   const pixelCrop = crop.unit === "px" ? crop : convertToPixelCrop(crop, image.width, image.height);
   const scaleX = image.naturalWidth / image.width;
   const scaleY = image.naturalHeight / image.height;
   const canvas = document.createElement("canvas");
-  canvas.width = pixelCrop.width * scaleX;
-  canvas.height = pixelCrop.height * scaleY;
+  const srcW = pixelCrop.width * scaleX;
+  const srcH = pixelCrop.height * scaleY;
+  // Cap the long edge so uploads stay light; phone photos are often 4000px+.
+  const shrink = Math.min(1, MAX_PHOTO_EDGE / Math.max(srcW, srcH));
+  canvas.width = Math.round(srcW * shrink);
+  canvas.height = Math.round(srcH * shrink);
   const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
     image,
-    pixelCrop.x * scaleX, pixelCrop.y * scaleY, pixelCrop.width * scaleX, pixelCrop.height * scaleY,
+    pixelCrop.x * scaleX, pixelCrop.y * scaleY, srcW, srcH,
     0, 0, canvas.width, canvas.height
   );
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Canvas toBlob failed"))), "image/jpeg", 0.9);
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Canvas toBlob failed"))), "image/jpeg", 0.82);
   });
 }
 
@@ -522,6 +529,8 @@ function ItemCard({ item, onClick, onAddToList, showLocation = true }) {
           <img
             src={item.photo}
             alt={item.title}
+            loading="lazy"
+            decoding="async"
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
         ) : (

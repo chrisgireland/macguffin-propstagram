@@ -296,7 +296,10 @@ async function route(request, env, url, path) {
       const ext = (file.name?.split(".").pop() || "jpg").toLowerCase().slice(0, 5);
       const key = `props/${crypto.randomUUID()}.${ext}`;
       await env.PHOTOS.put(key, await file.arrayBuffer(), {
-        httpMetadata: { contentType: file.type || "image/jpeg" },
+        httpMetadata: {
+          contentType: file.type || "image/jpeg",
+          cacheControl: "public, max-age=31536000, immutable",
+        },
       });
       const base = (env.PHOTOS_PUBLIC_BASE_URL || "").replace(/\/$/, "");
       return json({ url: `${base}/${key}` }, 201);
